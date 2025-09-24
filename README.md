@@ -1,8 +1,9 @@
-# Technical Specification (Draft v0.1)
+# LKvitai.MES — Warehouse & Agnum Integration
+**Technical Specification (Draft v0.2 — adds Batch/Lot “Party” Accounting)**  
 **Project:** LKvitai.MES — Warehouse & Agnum Integration  
 **Author:** Denis / ChatGPT (for LKvitai.MES)  
-**Date:** 2025‑09‑20  
-**Status:** Draft (v0.1) — ready for internal review
+**Date:** 2025‑09‑24  
+**Status:** Draft (v0.2) — ready for internal review
 
 ---
 
@@ -23,6 +24,7 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 6. **Agnum integration** with flexible slicing (logical/physical/group/total) and scheduled export.
 7. **Operator‑safe UX** (scanning, validation, undo).
 8. **Warehouse plan** (schematic) and **optional 3D** visualization (wow/demo).
+9. **Batch/Lot (“party”) traceability** end‑to‑end (receive → moves → convert → issue/ship) with **FEFO** option, **expiry** and **quarantine** handling.
 
 ---
 
@@ -36,6 +38,7 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 - **Agnum export** (CSV/XML/JSON — one will be primary, others optional) with configurable slicing & schedule.
 - **Audit trail** for all movements and value adjustments.
 - **Table‑based UI** + schematic warehouse plan (MVP).
+- **Batch/Lot (“party”) accounting**: batch attributes, FEFO picking, **split/merge**, relabeling, **traceability & recall reports**.
 
 ### Out of scope (phase‑1)
 - Hardware procurement & selection (scanners/printers/tablets).
@@ -94,7 +97,7 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 - Export modalities: **by logical warehouse**, **by physical warehouse**, **by group/category**, **aggregated total**.
 - Export formats: **CSV (primary)**; XML/JSON optional.
 - **Scheduling**: daily/weekly/monthly/quarterly; manual “Export Now” button.
-- **Mapping config**: SKU code, warehouse codes, UoM, quantity (base), value (adjusted), batch/lot (optional), time.
+- **Mapping config**: SKU code, warehouse codes, UoM, quantity (base), value (adjusted), batch/lot (optional/required per config), time.
 - **Delivery**: file share/SFTP/folder drop; file naming with timestamp & slice code.
 - **Validation**: dry‑run & per‑row error file.
 
@@ -108,12 +111,30 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 - **Validation & Undo**: pre‑checks (conversions, permissions), soft‑undo window, hard audit trail.
 - **Permissions (RBAC)**: role → operation rights; sensitive ops with 4‑eyes approval.
 
+### 6.8 Batch/Lot (“Party”) Accounting
+**Goal:** Track goods by **batch/lot** across all operations; enable **traceability**, **expiry control**, **FEFO** picking, and **recall** scenarios.
+
+**Requirements**
+- **Batch attributes** at receive: `BatchCode` (system‑generated or scanned), `SupplierBatch` (optional), `MfgDate` (optional), `ExpDate` (optional), `Quality` (OK/Quarantine/Scrap), `Origin` (optional).
+- **Per‑batch quality**: status changes are batch‑scoped; block issuing expired or quarantined batches (configurable override with approval).
+- **FEFO picking**: optional rule engine to suggest/auto‑enforce **First‑Expire‑First‑Out**; fallback to FIFO if no expiry.
+- **Split/Merge**: allow **splitting** a batch into multiple labels/containers and **merging** compatible batches; keep lineage links.
+- **Relabel/Repack**: generate new label(s) maintaining the same lineage; printer integration later.
+- **Conversions by batch**: convert UoM while preserving batch identity and lineage (e.g., 1 pallet → 30 bags of same batch).
+- **Traceability queries**: _“Where is batch X?”_, _“Which shipments contained batch X?”_, _“Which batches were used in order Y?”_ with time‑range filters.
+- **Recall procedure**: mark a batch as **Blocked/Recall**; prevent picks; locate all on‑hand and shipped quantities; export a **recall report**.
+- **Inventory by batch**: scanning validates batch and location; variances post batch‑specific adjustments.
+- **Configurable granularity**: per‑SKU toggle whether batch tracking is **Mandatory / Optional / Disabled**.
+- **Barcodes/standards**: support scanning **plain codes** now; plan for **GS1‑128/QR** with (10) batch and (17) expiry later.
+- **API/Events**: all batch operations emit events (optional in MVP), include lineage references.
+- **Privacy**: batch data contains no PII; safe to export.
+
 ---
 
 ## 7) Non‑Functional Requirements
 - **Availability:** 99.5%+ for internal ops; graceful degradation if export fails (retry queue).
 - **Performance:** stock list ≤ 300 ms for common filters; movements creation ≤ 200 ms.
-- **Auditability:** immutable movement & value‑adjustment logs.
+- **Auditability:** immutable movement & value‑adjustment logs **and batch lineage** (split/merge/relabel graph).
 - **Security:** per‑role permissions; signed export files (hash); PII‑free by design.
 - **Deployability:** Docker compose/K8s‑ready; health checks; metrics (Prometheus); logs (Grafana).
 - **Portability:** MS SQL primary; consider NoSQL for event log if needed.
@@ -124,42 +145,45 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 ## 8) Data Model (Conceptual)
 **Item (SKU)**: Id, Code, Name, CategoryIds[], BaseUoM, Active.  
 **Warehouse (Physical)**: Id, Code, Name, ParentId (nullable), Type(WH/Zone/Rack/Bin).  
-**Warehouse (Logical)**: Id, Code, Name, StatusType (Reserve/Scrap/…).
-**StockBatch**: Id, ItemId, BatchCode (label), Quality(OK/Quarantine/Scrap), Mfg/Exp (optional).  
+**Warehouse (Logical)**: Id, Code, Name, StatusType (Reserve/Scrap/…).  
+**StockBatch**: Id, ItemId, BatchCode, SupplierBatch (opt), Quality(OK/Quarantine/Scrap/Blocked/Recall), MfgDate(opt), ExpDate(opt), Origin(opt).  
 **StockBalance**: ItemId, PhysicalBinId, LogicalId, BatchId, QtyBase, Value (current).  
-**Movement**: Id, Type(Receive/Transfer/Adjust/Convert/StatusChange/Inventory), From/To, QtyBase, UserId, Reason, Timestamp.  
+**Movement**: Id, Type(Receive/Transfer/Adjust/Convert/StatusChange/Inventory/Split/Merge/Relabel), From/To, BatchId(s), QtyBase, UserId, Reason, Timestamp.  
+**BatchLineage**: Id, ParentBatchId, ChildBatchId, RelationType(Split/Merge/Relabel/Convert), QtyBase, Timestamp, MovementId.  
 **InventorySession**: Id, Scope (bins/items), Status(Open/Closed), StartedAt, ClosedAt.  
 **InventoryCount**: SessionId, ItemId, BinId, BatchId, CountQtyBase, ScannerUserId, Variance.  
 **ValueAdjustment**: Id, ItemId/BatchId/(BinId optional), DeltaValue, Reason, Timestamp, UserId.  
 **UoMConversion**: ItemId/CategoryId, FromUoM, ToUoM, Ratio, RoundingMode.  
-**ExportJob**: Id, SliceType, SliceKey, Format, Status, StartedAt, CompletedAt, FilePath, ErrorFile.
+**ExportJob**: Id, SliceType, SliceKey, Format, Status, StartedAt, CompletedAt, FilePath, ErrorFile.  
+**RecallNotice** (opt): Id, BatchId, Status(Open/Closed), CreatedAt, ClosedAt, Notes.
 
-*Indexes*: by (ItemId, BinId, LogicalId), by BatchCode, by Movement.Timestamp; filtered indexes for fast open inventory sessions.
+*Indexes*: by (ItemId, BinId, LogicalId, BatchId), by BatchCode, by ExpDate, by Movement.Timestamp; filtered indexes for open inventory sessions.
 
 ---
 
 ## 9) Services & API (High‑Level)
 - **Warehouse Service**: manage physical/logical structures; plan view.  
   REST: `GET /warehouses`, `POST /warehouses`, …  
-- **Stock Service**: movements, balances, inventory, conversions.  
-  REST: `POST /movements`, `GET /balances`, `POST /inventory/sessions`, …  
+- **Stock Service**: movements, balances, inventory, conversions, **batch lineage**.  
+  REST: `POST /movements`, `GET /balances`, `POST /inventory/sessions`, `GET /batches/{batchCode}`, `GET /batches/{id}/trace`, …  
 - **Export (Agnum) Service**: slicing rules, schedule, generate files, delivery.  
   REST: `POST /exports/run`, `GET /exports/:id`, `PUT /exports/schedule`, …  
 - **Label Service** (later): generate/print serial labels; parse scans.  
 - **Auth/RBAC** (shared): roles, permissions, audit hooks.
 
 **Events (MQTT/Bus)** _(optional in MVP)_:  
-`stock.received`, `stock.transferred`, `stock.adjusted`, `stock.converted`, `stock.inventory.closed`, `export.completed`.
+`stock.received`, `stock.transferred`, `stock.adjusted`, `stock.converted`, `stock.inventory.closed`, `batch.split`, `batch.merge`, `batch.relabel`, `batch.recall.marked`, `export.completed`.
 
 ---
 
 ## 10) UI / Screens (MVP)
-1. **Stock List (Balances)** — fast grid, filters: SKU, warehouse (phys/logical), quality, batch; totals in base UoM and display UoM; “Export” CTA.
-2. **New Movement** — tabs: Receive, Transfer, Adjust, Convert, Status; scan label → prefill; live validation; undo toast.
+1. **Stock List (Balances)** — fast grid, filters: SKU, warehouse (phys/logical), quality, **batch**, expiry; totals in base UoM and display UoM; “Export” CTA.
+2. **New Movement** — tabs: Receive, Transfer, Adjust, Convert, Status, **Split/Merge/Relabel**; scan label → prefill; live validation; undo toast.
 3. **Inventory Sessions** — create scope (bins/items), print sheets/labels, scan & count UI, variance resolution, close session.
 4. **Value Adjustments** — select scope (SKU/batch/bin), delta value, reason, preview effect on export.
 5. **Agnum Export** — choose slice (logical/physical/group/total), format, schedule; run now; view history/files/errors.
-6. **Warehouse Plan** — schematic tree & grid; locate SKU/batch; highlight bins; nav to movement.
+6. **Warehouse Plan** — schematic tree & grid; locate SKU/**batch**; highlight bins; nav to movement.
+7. **Batch Detail & Traceability** — batch attributes, on‑hand by location, movements timeline, lineage graph, recall actions.
 
 ---
 
@@ -169,20 +193,21 @@ Initial UX is a **simple table‑based UI** (operator‑friendly), with a **plan
 - `ItemCode`, `ItemName` (optional), `BaseUoM`,  
 - `QtyBase`, `DisplayQty` (qty + display UoM),  
 - `AdjValue` (current value including manual adjustments),  
-- `BatchCode` (optional), `LocationCode` (physical bin), `Quality`.
+- `BatchCode` (**configurable: Required/Mandatory per SKU or slice**), `LocationCode` (physical bin), `Quality`, `ExpDate` (optional).
 
 **File naming:** `stock_{SliceType}_{SliceKey}_{yyyyMMdd_HHmmss}.csv`  
 **Delivery:** local shared folder or SFTP.  
 **Validation:** generate `_errors.csv` for rejected rows.  
 **Scheduling:** CRON‑like config; manual override.
 
-_Open questions for Agnum:_ required identifiers, supported slices, decimal/thousand separators, encoding (UTF‑8 BOM?).
+_Open questions for Agnum:_ required identifiers, supported slices, decimal/thousand separators, encoding (UTF‑8 BOM?), **does Agnum support batch/expiry fields natively?** If not, confirm a separate “BatchBalances” file or extended schema.
 
 ---
 
 ## 12) Security & Audit
 - **RBAC** per role & operation; special approval for Adjust/Value/Status.
 - **Audit log** persists: who, what, when, before/after deltas, reason code.
+- **Batch lineage audit**: split/merge/relabel links and amounts are immutable and queryable.
 - **Data retention** policy & export of audit for external review.
 
 ---
@@ -202,6 +227,7 @@ _Open questions for Agnum:_ required identifiers, supported slices, decimal/thou
 - **Inventory:** Scanning a label pulls the exact batch; variance report lists per‑bin deltas; closing session posts movements with audit.
 - **Value adjustments:** Change affects `AdjValue` in exports but not `QtyBase` nor movement history.
 - **Exports:** Can produce CSV by any slice with correct totals; error file generated for invalid rows; scheduled job runs at configured time.
+- **Batch/Lot:** FEFO suggestion/enforcement works; expired/quarantined batches are blocked unless override with approval; **traceability report** returns locations and shipments for a batch within ≤ 2 seconds for N≤50k movements.
 - **UX safety:** Forbidden actions blocked by RBAC; undo works for N seconds; all operations logged.
 
 ---
@@ -229,33 +255,37 @@ _Open questions for Agnum:_ required identifiers, supported slices, decimal/thou
 
 **Deliverable:** MVP of movements & balances.
 
-### Sprint 3 (Weeks 5–6) — Conversions & Inventory
+### Sprint 3 (Weeks 5–6) — Conversions & Inventory & **Party (Batch/Lot)**
 - **As an operator**, I want to convert pallets ↔ bags ↔ pcs, so that operations are smooth.  
   **AC:** Conversions preserve totals; rounding rules applied.  
 - **As a controller**, I want to perform inventory by scanning labels, so that discrepancies are resolved.  
   **AC:** Sessions, counts, variance, posting movements.  
-- **As a manager**, I want low/empty stock alerts, so that I can react on time.  
-  **AC:** Configurable thresholds; alert feed/log.
+- **As a warehouse operator**, I want to **receive and move goods by batch/lot**, so that traceability is preserved.  
+  **AC:** Batch attributes captured on receive; moves keep `BatchId` intact.  
+- **As a planner**, I want **FEFO** suggestions for picks, so that soon‑to‑expire stock is used first.  
+  **AC:** FEFO rule toggle; UI highlights suggested batches.
 
-**Deliverable:** Inventory with scanning; conversion engine.
+**Deliverable:** Inventory with scanning; conversion engine; batch basics with FEFO suggestions.
 
 ### Sprint 4 (Weeks 7–8) — Agnum Exports
 - **As an accountant**, I want to export balances by warehouse/group/total, so that accounting is correct.  
   **AC:** CSV export per slice; tested with sample data.  
 - **As an accountant**, I want to schedule exports, so that data flows automatically.  
   **AC:** Scheduler + history; error file for rejects.
+- **As a compliance officer**, I want **batch in exports** (when configured), so that downstream systems can reconcile lots.  
+  **AC:** CSV includes `BatchCode` when SKU requires batch tracking.
 
 **Deliverable:** Working export pipeline to Agnum (file drop).
 
-### Sprint 5 (Weeks 9–10) — Value Adjustments & Plan
+### Sprint 5 (Weeks 9–10) — Value Adjustments & Plan & **Traceability**
 - **As a CFO**, I want manual value adjustments, so that reported P&L fits requirements.  
   **AC:** Value ledger; export reflects adjustments; audit trail.  
 - **As a manager**, I want a warehouse plan (schematic), so that I can quickly locate items.  
   **AC:** Plan page; locate SKU/batch; navigate to bin.
-- **As a manager**, I want optional 3D visualization, so that I can demo or explore layout.  
-  **AC:** Prototype page (if time permits).
+- **As a quality manager**, I want **traceability & recall** reports for a batch, so that I can block and locate all affected stock.  
+  **AC:** Batch detail page with lineage graph and recall action; on‑hand & shipped lists exported as CSV.
 
-**Deliverable:** Value adjustments + plan view (+ optional 3D demo).
+**Deliverable:** Value adjustments + plan view (+ optional 3D demo) + traceability/recall.
 
 ### Sprint 6 (Weeks 11–12) — Testing & Go‑Live
 - **As a QA**, I want automated tests for stock operations, so that regressions are caught.  
@@ -272,6 +302,7 @@ _Open questions for Agnum:_ required identifiers, supported slices, decimal/thou
 ## 16) Risks & Open Questions
 - **Agnum mapping details**: exact field list, identifiers, encoding, error‑handling expectations.  
 - **Virtual warehouses in Agnum**: native support vs emulate via groups?  
+- **Batch fields in Agnum**: confirm if Batch/Expiry is supported; if not, agree on a parallel file or ignore in export.  
 - **Depth of 3D**: basic highlight vs detailed model.  
 - **Mobile devices**: scanners/tablets at MVP or later?  
 - **Audit expectations**: do value adjustments require dual approval?  
@@ -284,9 +315,9 @@ Mitigations: lock the export CSV schema early; keep 3D as optional; design audit
 ## 17) Timeline & Milestones (3 months)
 - **M1 (Weeks 1–2):** Analysis & Prototype — *approved prototype, export format confirmed.*
 - **M2 (Weeks 3–4):** Core Stock — *receive/transfer/adjust, balances list.*
-- **M3 (Weeks 5–6):** Conversions & Inventory — *conversion engine, inventory sessions.*
-- **M4 (Weeks 7–8):** Exports — *CSV exports by slice; scheduler.*
-- **M5 (Weeks 9–10):** Value & Plan — *value adjustments; plan view (+3D demo optional).*
+- **M3 (Weeks 5–6):** Conversions, Inventory & Batch — *conversion engine, inventory sessions, batch basics.*
+- **M4 (Weeks 7–8):** Exports — *CSV exports by slice; scheduler; batch field wiring.*
+- **M5 (Weeks 9–10):** Value, Plan & Traceability — *value adjustments; plan view (+3D demo optional); batch traceability.*
 - **M6 (Weeks 11–12):** Test & Go‑Live — *tests, docs, deployment.*
 
 Definition of Done per sprint: features meet AC, tests added, docs updated, demo recorded.
@@ -299,15 +330,18 @@ Definition of Done per sprint: features meet AC, tests added, docs updated, demo
 - **Base UoM**: canonical unit for calculations (e.g., pcs or m²).  
 - **Display UoM**: operator‑friendly view (bags, pallets, meters).  
 - **Slice**: chosen export dimension (logical/physical/group/total).  
-- **AdjValue**: adjusted financial value for export (does not change quantity).
+- **AdjValue**: adjusted financial value for export (does not change quantity).  
+- **Batch/Lot (Party)**: a quantity of goods produced/received together and tracked as a unit; may have expiry.  
+- **FEFO**: First‑Expire‑First‑Out picking strategy.  
+- **GS1‑128**: barcode standard supporting (10) batch, (17) expiry, etc.
 
 ---
 
 ## 19) Appendix A — Sample CSV (Proposal)
 ```
-ExportAt,SliceType,SliceKey,ItemCode,BaseUoM,QtyBase,DisplayQty,AdjValue,BatchCode,LocationCode,Quality
-2025-09-20T19:30:00Z,Physical,WH1_Z1_R1_B01,ROLLER-01,pcs,120,"4 pallets",2450.00,B20250905,WH1-Z1-R1-B01,OK
-2025-09-20T19:30:00Z,Logical,RESERVE,ROLLER-01,pcs,35,"1 bag + 10 pcs",700.00,B20250905,WH1-Z1-R1-B02,OK
+ExportAt,SliceType,SliceKey,ItemCode,BaseUoM,QtyBase,DisplayQty,AdjValue,BatchCode,LocationCode,Quality,ExpDate
+2025-09-24T19:30:00Z,Physical,WH1_Z1_R1_B01,ROLLER-01,pcs,120,"4 pallets",2450.00,B20250905,WH1-Z1-R1-B01,OK,2026-03-31
+2025-09-24T19:30:00Z,Logical,RESERVE,ROLLER-01,pcs,35,"1 bag + 10 pcs",700.00,B20250905,WH1-Z1-R1-B02,OK,2026-03-31
 ```
 *To be validated with Agnum (fields, separators, encoding).*
 
