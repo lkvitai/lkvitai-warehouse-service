@@ -14,9 +14,14 @@ public class MovementConfig : IEntityTypeConfiguration<Movement>
         b.Property(x => x.DocNo).HasMaxLength(64);
         b.Property(x => x.Type).IsRequired().HasMaxLength(16);
         b.Property(x => x.Status).IsRequired().HasMaxLength(16);
+
         b.Property(x => x.ItemId).HasColumnType("uuid");
         b.Property(x => x.WarehousePhysicalId).HasColumnType("uuid");
         b.Property(x => x.BinId).HasColumnType("uuid");
+
+        b.Property(x => x.ToWarehousePhysicalId).HasColumnType("uuid");
+        b.Property(x => x.ToBinId).HasColumnType("uuid");
+
         b.Property(x => x.BatchId).HasColumnType("uuid");
         b.Property(x => x.QtyBase).HasColumnType("numeric(18,6)");
         b.Property(x => x.Uom).HasMaxLength(16);
@@ -27,5 +32,6 @@ public class MovementConfig : IEntityTypeConfiguration<Movement>
 
         b.HasIndex(x => x.PerformedAt);
         b.HasIndex(x => new { x.ItemId, x.BinId, x.BatchId });
+        b.HasIndex(x => new { x.ItemId, x.ToBinId, x.BatchId });
     }
 }
