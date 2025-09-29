@@ -1,0 +1,30 @@
+﻿# Build
+bin/
+obj/
+**/bin/
+**/obj/
+*.user
+*.suo
+*.rsuser
+
+# VS/IDE
+.vs/
+.vscode/
+
+# Packages/Tools
+*.nupkg
+*.snupkg
+/.tools/
+.nuget/
+
+# Logs
+*.log
+logs/
+
+# Secrets & local config
+src/Api/appsettings.Development.json
+*.Secret.json
+secrets.json
+
+# EF Migrations bundles (если будем собирать)
+*.efbundle
