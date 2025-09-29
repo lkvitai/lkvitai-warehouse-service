@@ -18,7 +18,14 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// Всегда включим Swagger пока dev
+// Dev-seed
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<Lkvitai.Warehouse.Infrastructure.Persistence.WarehouseDbContext>();
+    await Lkvitai.Warehouse.Infrastructure.Seed.DevSeed.EnsureAsync(db);
+}
+
+// Swagger
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -29,4 +36,4 @@ app.MapHealthChecks("/health");
 app.MapControllers();
 app.MapGet("/", () => "Warehouse API up");
 
-app.Run();
+await app.RunAsync();

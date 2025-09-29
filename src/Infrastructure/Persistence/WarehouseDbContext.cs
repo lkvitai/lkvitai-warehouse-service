@@ -12,9 +12,11 @@ public class WarehouseDbContext : DbContext
     public DbSet<WarehousePhysical> WarehousePhysicals => Set<WarehousePhysical>();
     public DbSet<Bin> Bins => Set<Bin>();
 
+    public DbSet<Movement> Movements => Set<Movement>();
+    public DbSet<StockBalance> StockBalances => Set<StockBalance>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
-        // Для gen_random_uuid()
         b.HasPostgresExtension("pgcrypto");
         b.HasDefaultSchema("wh");
         b.ApplyConfigurationsFromAssembly(typeof(WarehouseDbContext).Assembly);
