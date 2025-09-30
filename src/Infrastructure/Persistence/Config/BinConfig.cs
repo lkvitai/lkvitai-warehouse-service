@@ -10,7 +10,9 @@ public class BinConfig : IEntityTypeConfiguration<Bin>
     {
         b.ToTable("bin", "wh");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        b.Property(x => x.Id)
+            .HasColumnType("uuid")
+            .ValueGeneratedOnAdd();
         b.Property(x => x.WarehousePhysicalId).HasColumnType("uuid");
         b.Property(x => x.Code).IsRequired().HasMaxLength(64);
         b.HasIndex(x => new { x.WarehousePhysicalId, x.Code }).IsUnique();

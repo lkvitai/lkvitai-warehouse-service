@@ -2,7 +2,7 @@
 
 public class Movement
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public string DocNo { get; set; } = string.Empty;
     public string Type { get; set; } = "IN"; // IN / ADJUST / MOVE
     public string Status { get; set; } = "POSTED";

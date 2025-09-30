@@ -2,7 +2,7 @@
 
 public class StockBalance
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ItemId { get; set; }
     public Guid? WarehousePhysicalId { get; set; }
     public Guid? BinId { get; set; }

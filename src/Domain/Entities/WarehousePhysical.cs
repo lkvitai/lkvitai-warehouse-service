@@ -1,7 +1,7 @@
 ﻿namespace Lkvitai.Warehouse.Domain.Entities;
 public class WarehousePhysical
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public string Code { get; set; } = null!;
     public string Name { get; set; } = null!;
     public string? Address { get; set; }

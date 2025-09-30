@@ -1,7 +1,7 @@
 ﻿namespace Lkvitai.Warehouse.Domain.Entities;
 public class WarehouseLogical
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public string Code { get; set; } = null!;
     public string Name { get; set; } = null!;
     public string Kind { get; set; } = "DEFAULT"; // DEFAULT/CUSTOM

@@ -10,7 +10,9 @@ public class StockBalanceConfig : IEntityTypeConfiguration<StockBalance>
     {
         b.ToTable("stock_balance", "wh");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        b.Property(x => x.Id)
+            .HasColumnType("uuid")
+            .ValueGeneratedOnAdd();
         b.Property(x => x.ItemId).HasColumnType("uuid");
         b.Property(x => x.WarehousePhysicalId).HasColumnType("uuid");
         b.Property(x => x.BinId).HasColumnType("uuid");

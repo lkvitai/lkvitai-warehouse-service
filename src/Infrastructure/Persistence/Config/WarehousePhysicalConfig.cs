@@ -10,7 +10,9 @@ public class WarehousePhysicalConfig : IEntityTypeConfiguration<WarehousePhysica
     {
         b.ToTable("warehouse_physical", "wh");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        b.Property(x => x.Id)
+            .HasColumnType("uuid")
+            .ValueGeneratedOnAdd();
         b.Property(x => x.Code).IsRequired().HasMaxLength(64);
         b.HasIndex(x => x.Code).IsUnique();
         b.Property(x => x.Name).IsRequired().HasMaxLength(128);

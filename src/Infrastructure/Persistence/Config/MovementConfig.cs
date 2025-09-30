@@ -10,7 +10,9 @@ public class MovementConfig : IEntityTypeConfiguration<Movement>
     {
         b.ToTable("movement", "wh");
         b.HasKey(x => x.Id);
-        b.Property(x => x.Id).HasColumnType("uuid").HasDefaultValueSql("gen_random_uuid()");
+        b.Property(x => x.Id)
+            .HasColumnType("uuid")
+            .ValueGeneratedOnAdd();
         b.Property(x => x.DocNo).HasMaxLength(64);
         b.Property(x => x.Type).IsRequired().HasMaxLength(16);
         b.Property(x => x.Status).IsRequired().HasMaxLength(16);

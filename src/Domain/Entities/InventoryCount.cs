@@ -2,7 +2,7 @@ namespace Lkvitai.Warehouse.Domain.Entities;
 
 public class InventoryCount
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; set; } = Guid.NewGuid();
     public Guid SessionId { get; set; }
     public Guid ItemId { get; set; }
     public Guid? BinId { get; set; }
