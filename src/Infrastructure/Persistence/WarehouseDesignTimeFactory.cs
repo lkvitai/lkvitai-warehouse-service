@@ -9,7 +9,7 @@ namespace Lkvitai.Warehouse.Infrastructure.Persistence
         public WarehouseDbContext CreateDbContext(string[] args)
         {
             var cs = Environment.GetEnvironmentVariable("WH_CS")
-                     ?? "Host=<DB_IP>;Port=5432;Database=lkvitai-mes-wh;Username=app_user;Password=app_pass";
+                     ?? "Host=10.8.0.11;Port=5432;Database=lkvitai-mes-wh;Username=app_user;Password=app_pass";
 
             var options = new DbContextOptionsBuilder<WarehouseDbContext>()
                 .UseNpgsql(cs)

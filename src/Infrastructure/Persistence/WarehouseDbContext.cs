@@ -15,6 +15,9 @@ public class WarehouseDbContext : DbContext
     public DbSet<Movement> Movements => Set<Movement>();
     public DbSet<StockBalance> StockBalances => Set<StockBalance>();
 
+    public DbSet<InventorySession> InventorySessions => Set<InventorySession>();
+    public DbSet<InventoryCount> InventoryCounts => Set<InventoryCount>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasPostgresExtension("pgcrypto");

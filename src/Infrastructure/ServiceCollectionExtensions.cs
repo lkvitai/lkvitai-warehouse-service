@@ -31,6 +31,7 @@ namespace Lkvitai.Warehouse.Infrastructure
 
             // DI сервисов домена/инфры
             services.AddScoped<MovementService>();
+            services.AddScoped<InventoryService>();
 
             return services;
         }
