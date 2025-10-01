@@ -348,3 +348,155 @@ ExportAt,SliceType,SliceKey,ItemCode,BaseUoM,QtyBase,DisplayQty,AdjValue,BatchCo
 ---
 
 **End of document.**
+
+
+# LKvitai.MES — Warehouse Service
+
+![.NET](https://img.shields.io/badge/.NET-10.0-blueviolet)
+![EF Core](https://img.shields.io/badge/EF%20Core-9.0.9-lightblue)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)
+![Build](https://img.shields.io/github/actions/workflow/status/lkvitai/lkvitai-warehouse-service/dotnet.yml?label=build)
+![Tests](https://img.shields.io/github/actions/workflow/status/lkvitai/lkvitai-warehouse-service/tests.yml?label=tests)
+![License](https://img.shields.io/badge/license-Proprietary-red)
+
+Warehouse & Inventory microservice for **LKvitai.MES**.  
+Focus: always-correct physical balances, auditability, and smooth integration with **Agnum** (accounting) and **Avea** (legacy warehouse).
+
+---
+
+## 🚀 Features (MVP Scope)
+
+- **Items** — master data of SKUs  
+- **Warehouses / Zones / Racks / Bins** — logical & physical structure  
+- **Movements** — IN, OUT, MOVE, ADJUST  
+- **Balances** — always up-to-date stock levels (per item, bin, batch)  
+- **Inventory** — open / count / post cycle counting  
+- **Value Adjustments** — revaluation, markdowns without changing qty  
+- **Swagger UI** — REST API documentation  
+
+---
+
+## 📅 Roadmap
+
+- [x] Items CRUD  
+- [x] Warehouses & Bins CRUD  
+- [x] Movements & Balances  
+- [x] Inventory sessions  
+- [x] Value Adjustments  
+- [ ] Warehouse Plan (tree: warehouse → zone → rack → bin)  
+- [ ] Batch/Lot traceability (FEFO, expiry, quarantine)  
+- [ ] UoM & conversions (rounding rules)  
+- [ ] Agnum Export (SFTP, CSV, `_errors.csv`)  
+- [ ] RBAC (policies for export / corrections)  
+- [ ] Audit log (who/when did movements & adjustments)  
+
+---
+
+## 📊 User Stories Status
+
+| #   | User Story                                                                 | Status       |
+|-----|----------------------------------------------------------------------------|--------------|
+| US-1 | Create & manage **Items**                                                 | ✅ Done      |
+| US-2 | Create & manage **Warehouses / Bins**                                     | ✅ Done      |
+| US-3 | Record **Movements** (IN / MOVE / ADJUST)                                 | ✅ Done      |
+| US-4 | Track **Balances**                                                        | ✅ Done      |
+| US-5 | Perform **Inventory** (open / count / post)                               | ✅ Done      |
+| US-6 | Apply **Value Adjustments** (revaluation/markdown)                        | ✅ Done      |
+| US-7 | View **Warehouse Plan** (zones / racks / bins)                            | ⏳ Planned   |
+| US-8 | Support **Batch/Lot Traceability** (expiry, quarantine, FEFO)             | ⏳ Planned   |
+| US-9 | Handle **UoM & Conversions**                                              | ⏳ Planned   |
+| US-10| Export data to **Agnum** (Movements + Revaluations via SFTP/CSV)          | ⏳ In Progress |
+| US-11| Implement **RBAC** (policies for export/corrections)                      | ⏳ Planned   |
+| US-12| Provide **Audit Log** (movements & adjustments history)                   | ⏳ Planned   |
+
+Legend: ✅ Done · ⏳ Planned / In Progress
+
+---
+
+## 🛠️ Tech Stack
+
+- .NET 10 (RC)  
+- EF Core 9 (Npgsql 9)  
+- PostgreSQL 16  
+- Docker / docker-compose  
+- Unit Tests: SQLite InMemory  
+- Integration Tests: ASPNETCORE_ENVIRONMENT=Testing  
+
+---
+
+## ⚙️ Local Development
+
+```bash
+# build & run API
+dotnet build
+dotnet run --project src/Api
+
+# run docker-compose (Postgres + Adminer)
+docker compose up -d
+```
+
+API will be available at:  
+👉 https://localhost:5001/swagger  
+
+---
+
+## 🧪 Tests
+
+```bash
+dotnet test
+```
+
+- Unit tests (Domain logic, SQLite InMemory)  
+- Integration tests (WebApplicationFactory, PostgreSQL in Testing env)  
+
+---
+
+## 🔗 Integration with Agnum
+
+- Export **Movements** (IN, OUT, MOVE, INVENTORY±, WRITE-OFF)  
+- Export **Revaluations** (Value Adjustments)  
+- CSV via **SFTP** with retry & idempotency  
+- `_errors.csv` for invalid rows  
+
+Worker project handles scheduled exports.  
+
+---
+
+## 🏗️ Architecture
+
+### C4 Model Overview
+- **Context**: Warehouse Service as part of LKvitai.MES platform  
+- **Containers**:  
+  - API (REST, Swagger)  
+  - Worker (background jobs, Agnum export)  
+  - Infrastructure (EF Core, Npgsql, SFTP client)  
+  - Database (PostgreSQL)  
+- **Components**:  
+  - Items / Warehouses / Bins  
+  - Movements / Balances  
+  - Inventory sessions  
+  - Value Adjustments  
+  - Export service (Agnum integration)
+
+### Diagrams
+- 📄 [C4 Context Diagram](docs/diagrams/C4_Context.md)  
+- 📄 [C4 Container Diagram](docs/diagrams/C4_Container.md)  
+- 📄 [C4 Component Diagram](docs/diagrams/C4_Component.md)  
+- 📄 [BPMN Flows](docs/diagrams/BPMN_WarehouseFlows.md)  
+
+---
+
+## 👥 Roles (Context)
+
+- Sales Consultant → order input  
+- Warehouse Operator → receive, move, count  
+- Production Manager → balance control  
+- COO / Accountant → revaluations, Agnum export  
+- System Administrator → RBAC, audit  
+
+---
+
+## 📄 License
+
+Proprietary — Lauresta / LKvitai.MES project only.
+
