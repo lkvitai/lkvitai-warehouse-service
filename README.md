@@ -1,7 +1,7 @@
 # LKvitai.MES — Warehouse & Agnum Integration
 **Technical Specification (Draft v0.2 — adds Batch/Lot “Party” Accounting)**  
 **Project:** LKvitai.MES — Warehouse & Agnum Integration  
-**Author:** Denis / ChatGPT (for LKvitai.MES)  
+**Author:** Denis  
 **Date:** 2025‑09‑24  
 **Status:** Draft (v0.2) — ready for internal review
 
