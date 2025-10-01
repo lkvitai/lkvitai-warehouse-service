@@ -23,6 +23,9 @@ public class WarehouseDbContext : DbContext
     public DbSet<InventoryCount> InventoryCounts => Set<InventoryCount>();
     public DbSet<ValueAdjustment> ValueAdjustments => Set<ValueAdjustment>();
 
+    public DbSet<ExportJob> ExportJobs => Set<ExportJob>();
+    public DbSet<ExportSchedule> ExportSchedules => Set<ExportSchedule>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.HasPostgresExtension("pgcrypto");
