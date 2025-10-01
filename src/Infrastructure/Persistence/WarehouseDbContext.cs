@@ -17,6 +17,7 @@ public class WarehouseDbContext : DbContext
 
     public DbSet<InventorySession> InventorySessions => Set<InventorySession>();
     public DbSet<InventoryCount> InventoryCounts => Set<InventoryCount>();
+    public DbSet<ValueAdjustment> ValueAdjustments => Set<ValueAdjustment>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {

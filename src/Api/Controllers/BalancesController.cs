@@ -1,3 +1,4 @@
+using System.Linq;
 using Lkvitai.Warehouse.Application.Dto;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -12,26 +13,40 @@ public class BalancesController : ControllerBase
     private readonly WarehouseDbContext _db;
     public BalancesController(WarehouseDbContext db) => _db = db;
 
-    // Фильтры: itemId, warehousePhysicalId, binId
+    // Filters: itemId, warehousePhysicalId, binId
     [HttpGet]
     public async Task<IEnumerable<StockBalanceDto>> Get(
         [FromQuery] Guid? itemId = null,
         [FromQuery] Guid? warehousePhysicalId = null,
         [FromQuery] Guid? binId = null)
     {
-        var q = _db.StockBalances.AsNoTracking().AsQueryable();
+        var balances = _db.StockBalances.AsNoTracking().AsQueryable();
 
-        if (itemId is not null) q = q.Where(x => x.ItemId == itemId);
-        if (warehousePhysicalId is not null) q = q.Where(x => x.WarehousePhysicalId == warehousePhysicalId);
-        if (binId is not null) q = q.Where(x => x.BinId == binId);
+        if (itemId is not null) balances = balances.Where(x => x.ItemId == itemId);
+        if (warehousePhysicalId is not null) balances = balances.Where(x => x.WarehousePhysicalId == warehousePhysicalId);
+        if (binId is not null) balances = balances.Where(x => x.BinId == binId);
 
-        return await q
-            .OrderByDescending(x => x.UpdatedAt)
-            .Select(x => new StockBalanceDto(x.Id, x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId, x.QtyBase, x.UpdatedAt))
+        var rows = await balances
+            .Select(b => new StockBalanceDto(
+                b.Id,
+                b.ItemId,
+                b.WarehousePhysicalId,
+                b.BinId,
+                b.BatchId,
+                b.QtyBase,
+                b.UpdatedAt,
+                (from adj in _db.ValueAdjustments.AsNoTracking()
+                 where adj.ItemId == b.ItemId
+                       && (adj.WarehousePhysicalId ?? Guid.Empty) == (b.WarehousePhysicalId ?? Guid.Empty)
+                       && (adj.BinId ?? Guid.Empty) == (b.BinId ?? Guid.Empty)
+                       && (adj.BatchId ?? Guid.Empty) == (b.BatchId ?? Guid.Empty)
+                 select (decimal?)adj.DeltaValue).Sum() ?? 0m))
             .ToListAsync();
+
+        return rows.OrderByDescending(x => x.UpdatedAt);
     }
 
-    // Быстрый total по item/складу/ячейке
+    // Quick total by item/warehouse/bin
     [HttpGet("total")]
     public async Task<decimal> GetTotal(
         [FromQuery] Guid itemId,

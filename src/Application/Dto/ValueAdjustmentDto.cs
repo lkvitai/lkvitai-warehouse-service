@@ -1,12 +1,13 @@
 namespace Lkvitai.Warehouse.Application.Dto;
 
-public record StockBalanceDto(
+public record ValueAdjustmentDto(
     Guid Id,
     Guid ItemId,
     Guid? WarehousePhysicalId,
     Guid? BinId,
     Guid? BatchId,
-    decimal QtyBase,
-    DateTimeOffset UpdatedAt,
-    decimal AdjValue
+    decimal DeltaValue,
+    string? Reason,
+    DateTimeOffset Timestamp,
+    string? PerformedBy
 );

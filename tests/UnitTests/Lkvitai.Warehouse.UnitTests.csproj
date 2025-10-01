@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Infrastructure\Lkvitai.Warehouse.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Domain\Lkvitai.Warehouse.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Api\Lkvitai.Warehouse.Api.csproj" />
   </ItemGroup>
 </Project>
   
