@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Text;
+using Lkvitai.Warehouse.Infrastructure.Export;
 using Lkvitai.Warehouse.Application.Exports;
 using Lkvitai.Warehouse.Application.Exports.Contracts;
 using Lkvitai.Warehouse.Domain.Entities;
@@ -16,15 +17,18 @@ public sealed class AgnumExportService : IAgnumExportService
     private readonly WarehouseDbContext _db;
     private readonly AgnumExportOptions _options;
     private readonly ILogger<AgnumExportService> _logger;
+    private readonly SftpUploader _sftpUploader;
 
     public AgnumExportService(
         WarehouseDbContext db,
         IOptions<AgnumExportOptions> options,
-        ILogger<AgnumExportService> logger)
+        ILogger<AgnumExportService> logger,
+        SftpUploader sftpUploader)
     {
         _db = db;
         _options = options.Value;
         _logger = logger;
+        _sftpUploader = sftpUploader;
     }
 
     public async Task<ExportJob> RunAsync(AgnumExportRequest request, CancellationToken cancellationToken = default)
@@ -54,11 +58,12 @@ public sealed class AgnumExportService : IAgnumExportService
         {
             var result = await GenerateAsync(request, utcNow, cancellationToken);
 
-            job.Status = ExportJobStatus.Succeeded;
+            job.Status = result.Ok ? ExportJobStatus.Succeeded : ExportJobStatus.Failed;
             job.CompletedAt = DateTimeOffset.UtcNow;
             job.FilePath = result.FilePath;
             job.ErrorFilePath = result.ErrorFilePath;
             job.ExportedAtUtc = utcNow;
+            job.ErrorMessage = result.Ok ? null : FormatValidationError(result.Errors);
 
             await _db.SaveChangesAsync(cancellationToken);
             return job;
@@ -91,6 +96,17 @@ public sealed class AgnumExportService : IAgnumExportService
             throw new ArgumentException($"SliceType '{request.SliceType}' not supported", nameof(request));
     }
 
+    private static string FormatValidationError(IReadOnlyList<CsvValidation.RowError> errors)
+    {
+        if (errors.Count == 0)
+        {
+            return "CSV validation failed";
+        }
+
+        var first = errors[0];
+        var suffix = errors.Count > 1 ? $" (+{errors.Count - 1} more)" : string.Empty;
+        return $"CSV validation failed at line {first.LineNo}: {first.Message}{suffix}";
+    }
     private static bool IsSupportedSlice(string sliceType) =>
         string.Equals(sliceType, AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(sliceType, AgnumExportRequest.Types.Total, StringComparison.OrdinalIgnoreCase) ||
@@ -98,17 +114,13 @@ public sealed class AgnumExportService : IAgnumExportService
 
     private async Task<GenerationResult> GenerateAsync(AgnumExportRequest request, DateTimeOffset exportAtUtc, CancellationToken ct)
     {
-        EnsureDirectories();
+        ct.ThrowIfCancellationRequested();
 
         var sanitizedSliceKey = SanitizeForFileName(request.SliceKey);
         var timestamp = exportAtUtc.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-        var fileName = $"stock_{request.SliceType}_{sanitizedSliceKey}_{timestamp}.csv";
-        var filePath = Path.Combine(_options.OutDir, fileName);
-        var tempPath = Path.Combine(_options.OutDir, $".{Guid.NewGuid():N}_{fileName}");
-
-        var errorFileName = Path.GetFileNameWithoutExtension(fileName) + "_errors.csv";
-        var errorFilePath = Path.Combine(_options.ErrorsDir, errorFileName);
-        var tempErrorPath = Path.Combine(_options.ErrorsDir, $".{Guid.NewGuid():N}_{errorFileName}");
+        var fileBaseName = $"stock_{request.SliceType}_{sanitizedSliceKey}_{timestamp}";
+        var outDir = Path.Combine(Path.GetTempPath(), "agnum-exports");
+        Directory.CreateDirectory(outDir);
 
         IReadOnlyList<AgnumRow> rows;
         if (request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase))
@@ -126,30 +138,40 @@ public sealed class AgnumExportService : IAgnumExportService
             rows = await QueryLogicalAsync(request.SliceKey, exportAtUtc, ct);
         }
 
-        var (validRows, errorRows) = ValidateRows(rows);
+        ct.ThrowIfCancellationRequested();
 
-        if (validRows.Count == 0 && errorRows.Count > 0)
-            throw new InvalidOperationException("Export contains only invalid rows; see error file");
+        var lines = BuildCsvLines(rows);
+        var (ok, errors) = CsvValidation.Validate(lines);
 
-        await WriteCsvAsync(tempPath, validRows, ct);
-        File.Move(tempPath, filePath, overwrite: true);
+        var csvPath = Path.Combine(outDir, fileBaseName + ".csv");
+        await File.WriteAllLinesAsync(csvPath, lines, ct);
 
-        string? writtenErrorFile = null;
-        if (errorRows.Count > 0)
+        string? errorPath = null;
+        if (!ok)
         {
-            await WriteErrorCsvAsync(tempErrorPath, errorRows, ct);
-            File.Move(tempErrorPath, errorFilePath, overwrite: true);
-            writtenErrorFile = errorFilePath;
+            var errorCsv = CsvValidation.BuildErrorsCsv(errors);
+            errorPath = Path.Combine(outDir, fileBaseName + "_errors.csv");
+            await File.WriteAllTextAsync(errorPath, errorCsv, ct);
+            _logger.LogWarning("Agnum export validation errors for {SliceType}:{SliceKey} - {ErrorCount} issues", request.SliceType, request.SliceKey, errors.Count);
         }
 
         if (_options.CopyToArchive)
         {
-            var archiveFile = Path.Combine(_options.ArchiveDir, fileName);
             Directory.CreateDirectory(_options.ArchiveDir);
-            File.Copy(filePath, archiveFile, overwrite: true);
+            File.Copy(csvPath, Path.Combine(_options.ArchiveDir, Path.GetFileName(csvPath)), overwrite: true);
+            if (errorPath != null)
+            {
+                Directory.CreateDirectory(_options.ErrorsDir);
+                File.Copy(errorPath, Path.Combine(_options.ErrorsDir, Path.GetFileName(errorPath)), overwrite: true);
+            }
         }
 
-        return new GenerationResult(filePath, writtenErrorFile);
+        if (ok)
+        {
+            await _sftpUploader.UploadAsync(csvPath, Path.GetFileName(csvPath), ct);
+        }
+
+        return new GenerationResult(ok, csvPath, errorPath, errors);
     }
 
     private async Task<IReadOnlyList<BalanceRecord>> LoadDataAsync(AgnumExportRequest request, CancellationToken ct)
@@ -479,6 +501,7 @@ public sealed class AgnumExportService : IAgnumExportService
                 balance.ItemCode,
                 balance.BaseUoM,
                 balance.QtyBase,
+                balance.QtyBase,
                 adj?.Sum ?? 0m,
                 balance.BatchCode,
                 balance.LogicalCode,
@@ -494,6 +517,7 @@ public sealed class AgnumExportService : IAgnumExportService
                 adj.LogicalCode,
                 adj.ItemCode,
                 adj.BaseUoM,
+                0m,
                 0m,
                 adj.Sum,
                 adj.BatchCode,
@@ -521,6 +545,7 @@ public sealed class AgnumExportService : IAgnumExportService
                 g.Key.ItemCode,
                 g.Key.BaseUoM,
                 g.Sum(x => x.QtyBase),
+                g.Sum(x => x.QtyBase),
                 g.Sum(x => x.AdjValue),
                 g.Key.BatchCode,
                 g.Key.BinCode,
@@ -545,6 +570,7 @@ public sealed class AgnumExportService : IAgnumExportService
                 g.Key.ItemCode,
                 g.Key.BaseUoM,
                 g.Sum(x => x.QtyBase),
+                g.Sum(x => x.QtyBase),
                 g.Sum(x => x.AdjValue),
                 BatchCode: null,
                 LocationCode: string.Empty,
@@ -553,98 +579,32 @@ public sealed class AgnumExportService : IAgnumExportService
             .ToList();
     }
 
-    private static (List<AgnumRow> ValidRows, List<ErrorRow> Errors) ValidateRows(IReadOnlyList<AgnumRow> rows)
+
+    private static string[] BuildCsvLines(IReadOnlyList<AgnumRow> rows)
     {
-        var valid = new List<AgnumRow>(rows.Count);
-        var errors = new List<ErrorRow>();
+        var lines = new string[rows.Count + 1];
+        lines[0] = string.Join(',', CsvValidation.Header);
 
-        foreach (var row in rows)
+        for (var i = 0; i < rows.Count; i++)
         {
-            if (string.IsNullOrWhiteSpace(row.ItemCode))
-            {
-                errors.Add(new ErrorRow(row.ExportAtUtc, row.SliceType, row.SliceKey, row.ItemCode, "Missing ItemCode"));
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(row.BaseUoM))
-            {
-                errors.Add(new ErrorRow(row.ExportAtUtc, row.SliceType, row.SliceKey, row.ItemCode, "Missing BaseUoM"));
-                continue;
-            }
-
-            if (row.SliceType == AgnumExportRequest.Types.Physical && string.IsNullOrWhiteSpace(row.LocationCode))
-            {
-                errors.Add(new ErrorRow(row.ExportAtUtc, row.SliceType, row.SliceKey, row.ItemCode, "Missing LocationCode"));
-                continue;
-            }
-
-            valid.Add(row);
-        }
-
-        return (valid, errors);
-    }
-
-    private static async Task WriteCsvAsync(string filePath, IReadOnlyList<AgnumRow> rows, CancellationToken ct)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-
-        await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-
-        await writer.WriteLineAsync("ExportAtUtc,SliceType,SliceKey,ItemCode,BaseUoM,QtyBase,AdjValue,BatchCode,LocationCode,Quality,ExpDate");
-
-        foreach (var row in rows)
-        {
-            ct.ThrowIfCancellationRequested();
-            var line = string.Join(',',
+            var row = rows[i];
+            lines[i + 1] = string.Join(',',
                 Escape(row.ExportAtUtc.ToString("o", CultureInfo.InvariantCulture)),
                 Escape(row.SliceType),
                 Escape(row.SliceKey),
                 Escape(row.ItemCode),
                 Escape(row.BaseUoM),
                 Escape(row.QtyBase.ToString("0.####", CultureInfo.InvariantCulture)),
+                Escape(row.DisplayQty.ToString("0.####", CultureInfo.InvariantCulture)),
                 Escape(row.AdjValue.ToString("0.00", CultureInfo.InvariantCulture)),
                 Escape(row.BatchCode),
                 Escape(row.LocationCode),
                 Escape(row.Quality),
                 Escape(row.ExpDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
-
-            await writer.WriteLineAsync(line);
         }
+
+        return lines;
     }
-
-    private static async Task WriteErrorCsvAsync(string filePath, IReadOnlyList<ErrorRow> errors, CancellationToken ct)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-
-        await using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-
-        await writer.WriteLineAsync("ExportAtUtc,SliceType,SliceKey,ItemCode,Reason");
-
-        foreach (var error in errors)
-        {
-            ct.ThrowIfCancellationRequested();
-            var line = string.Join(',',
-                Escape(error.ExportAtUtc.ToString("o", CultureInfo.InvariantCulture)),
-                Escape(error.SliceType),
-                Escape(error.SliceKey),
-                Escape(error.ItemCode),
-                Escape(error.Reason));
-            await writer.WriteLineAsync(line);
-        }
-    }
-
-    private void EnsureDirectories()
-    {
-        Directory.CreateDirectory(_options.OutDir);
-        Directory.CreateDirectory(_options.ErrorsDir);
-        if (_options.CopyToArchive)
-        {
-            Directory.CreateDirectory(_options.ArchiveDir);
-        }
-    }
-
     private static string SanitizeForFileName(string input)
     {
         var invalid = Path.GetInvalidFileNameChars();
@@ -678,7 +638,7 @@ public sealed class AgnumExportService : IAgnumExportService
         return needsQuotes ? $"\"{escaped}\"" : escaped;
     }
 
-    private sealed record GenerationResult(string FilePath, string? ErrorFilePath);
+    private sealed record GenerationResult(bool Ok, string FilePath, string? ErrorFilePath, IReadOnlyList<CsvValidation.RowError> Errors);
 
     private sealed record BalanceRecord(
         Guid ItemId,
@@ -737,18 +697,11 @@ public sealed class AgnumExportService : IAgnumExportService
         string? ItemCode,
         string? BaseUoM,
         decimal QtyBase,
+        decimal DisplayQty,
         decimal AdjValue,
         string? BatchCode,
         string? LocationCode,
         string? Quality,
         DateTime? ExpDate);
 
-    private sealed record ErrorRow(
-        DateTimeOffset ExportAtUtc,
-        string SliceType,
-        string SliceKey,
-        string? ItemCode,
-        string Reason);
 }
-
-

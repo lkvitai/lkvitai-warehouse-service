@@ -1,10 +1,12 @@
-﻿using System.Linq;
+using System.Linq;
 using Xunit;
 using Lkvitai.Warehouse.Application.Exports.Contracts;
 using Lkvitai.Warehouse.Domain.Entities;
 using Lkvitai.Warehouse.Infrastructure.Options;
+using Lkvitai.Warehouse.Infrastructure.Export;
 using Lkvitai.Warehouse.Infrastructure.Services;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace Lkvitai.Warehouse.UnitTests;
@@ -45,7 +47,8 @@ public sealed class AgnumExportServiceTests
         await db.SaveChangesAsync();
 
         var options = CreateOptions();
-        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance);
+        var sftp = new FakeSftpUploader();
+        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance, sftp);
 
         var job = await service.RunAsync(new AgnumExportRequest(AgnumExportRequest.Types.Physical, warehouse.Code));
 
@@ -54,7 +57,7 @@ public sealed class AgnumExportServiceTests
         Assert.True(File.Exists(job.FilePath!));
 
         var lines = await File.ReadAllLinesAsync(job.FilePath!);
-        Assert.Equal("ExportAtUtc,SliceType,SliceKey,ItemCode,BaseUoM,QtyBase,AdjValue,BatchCode,LocationCode,Quality,ExpDate", lines[0]);
+        Assert.Equal(string.Join(',', CsvValidation.Header), lines[0]);
         Assert.Equal(2, lines.Length);
 
         var parts = lines[1].Split(',');
@@ -63,8 +66,14 @@ public sealed class AgnumExportServiceTests
         Assert.Equal("SKU-1", parts[3]);
         Assert.Equal("PCS", parts[4]);
         Assert.Equal("10", parts[5]);
-        Assert.Equal("5.00", parts[6]);
-        Assert.Equal("B01", parts[8]);
+        Assert.Equal("10", parts[6]);
+        Assert.Equal("5.00", parts[7]);
+        Assert.Equal("B01", parts[9]);
+
+        Assert.Single(sftp.Uploads);
+        var upload = sftp.Uploads.Single();
+        Assert.Equal(job.FilePath, upload.LocalPath);
+        Assert.Equal(Path.GetFileName(job.FilePath!), upload.RemoteFileName);
 
         Cleanup(options.Value);
     }
@@ -95,7 +104,8 @@ public sealed class AgnumExportServiceTests
         await db.SaveChangesAsync();
 
         var options = CreateOptions();
-        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance);
+        var sftp = new FakeSftpUploader();
+        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance, sftp);
 
         var job = await service.RunAsync(new AgnumExportRequest(AgnumExportRequest.Types.Total, warehouse.Code));
 
@@ -110,8 +120,14 @@ public sealed class AgnumExportServiceTests
         Assert.Equal("Total", parts[1]);
         Assert.Equal("WH1", parts[2]);
         Assert.Equal("8", parts[5]);
-        Assert.Equal("3.00", parts[6]);
-        Assert.Equal(string.Empty, parts[8]);
+        Assert.Equal("8", parts[6]);
+        Assert.Equal("3.00", parts[7]);
+        Assert.Equal(string.Empty, parts[9]);
+
+        Assert.Single(sftp.Uploads);
+        var upload = sftp.Uploads.Single();
+        Assert.Equal(job.FilePath, upload.LocalPath);
+        Assert.Equal(Path.GetFileName(job.FilePath!), upload.RemoteFileName);
 
         Cleanup(options.Value);
     }
@@ -143,7 +159,8 @@ public sealed class AgnumExportServiceTests
         await db.SaveChangesAsync();
 
         var options = CreateOptions();
-        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance);
+        var sftp = new FakeSftpUploader();
+        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance, sftp);
 
         var job = await service.RunAsync(new AgnumExportRequest(AgnumExportRequest.Types.Logical, logical.Code));
 
@@ -156,14 +173,21 @@ public sealed class AgnumExportServiceTests
         Assert.Equal("Logical", parts1[1]);
         Assert.Equal(logical.Code, parts1[2]);
         Assert.Equal("4", parts1[5]);
-        Assert.Equal("10.00", parts1[6]);
-        Assert.Equal(logical.Code, parts1[8]);
+        Assert.Equal("4", parts1[6]);
+        Assert.Equal("10.00", parts1[7]);
+        Assert.Equal(logical.Code, parts1[9]);
 
         var row2 = lines.Single(l => l.Contains(item2.Sku));
         var parts2 = row2.Split(",");
         Assert.Equal("0", parts2[5]);
-        Assert.Equal("5.00", parts2[6]);
-        Assert.Equal(logical.Code, parts2[8]);
+        Assert.Equal("0", parts2[6]);
+        Assert.Equal("5.00", parts2[7]);
+        Assert.Equal(logical.Code, parts2[9]);
+
+        Assert.Single(sftp.Uploads);
+        var upload = sftp.Uploads.Single();
+        Assert.Equal(job.FilePath, upload.LocalPath);
+        Assert.Equal(Path.GetFileName(job.FilePath!), upload.RemoteFileName);
 
         Cleanup(options.Value);
     }
@@ -197,6 +221,22 @@ public sealed class AgnumExportServiceTests
         catch
         {
             // ignore cleanup failures in tests
+        }
+    }
+
+    private sealed class FakeSftpUploader : SftpUploader
+    {
+        public FakeSftpUploader()
+            : base(new ConfigurationBuilder().AddInMemoryCollection().Build())
+        {
+        }
+
+        public List<(string LocalPath, string RemoteFileName)> Uploads { get; } = new();
+
+        public override Task UploadAsync(string localPath, string remoteFileName, CancellationToken ct = default)
+        {
+            Uploads.Add((localPath, remoteFileName));
+            return Task.CompletedTask;
         }
     }
 }
