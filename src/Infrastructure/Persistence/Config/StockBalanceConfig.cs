@@ -1,4 +1,4 @@
-using Lkvitai.Warehouse.Domain.Entities;
+﻿using Lkvitai.Warehouse.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -15,6 +15,7 @@ public class StockBalanceConfig : IEntityTypeConfiguration<StockBalance>
             .ValueGeneratedOnAdd();
         b.Property(x => x.ItemId).HasColumnType("uuid");
         b.Property(x => x.WarehousePhysicalId).HasColumnType("uuid");
+        b.Property(x => x.WarehouseLogicalId).HasColumnType("uuid");
         b.Property(x => x.BinId).HasColumnType("uuid");
         b.Property(x => x.BatchId).HasColumnType("uuid");
         b.Property(x => x.QtyBase).HasColumnType("numeric(18,6)");
@@ -25,6 +26,12 @@ public class StockBalanceConfig : IEntityTypeConfiguration<StockBalance>
             .HasForeignKey(x => x.BatchId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId }).IsUnique();
+        b.HasOne(x => x.WarehouseLogical)
+            .WithMany()
+            .HasForeignKey(x => x.WarehouseLogicalId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasIndex(x => x.WarehouseLogicalId);
+        b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.WarehouseLogicalId, x.BinId, x.BatchId }).IsUnique();
     }
 }

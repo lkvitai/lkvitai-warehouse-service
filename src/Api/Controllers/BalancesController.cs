@@ -38,6 +38,7 @@ public class BalancesController : ControllerBase
                 (from adj in _db.ValueAdjustments.AsNoTracking()
                  where adj.ItemId == b.ItemId
                        && adj.WarehousePhysicalId == b.WarehousePhysicalId
+                       && adj.WarehouseLogicalId == b.WarehouseLogicalId
                        && adj.BinId == b.BinId
                        && adj.BatchId == b.BatchId
                  select (decimal?)adj.DeltaValue).Sum() ?? 0m))

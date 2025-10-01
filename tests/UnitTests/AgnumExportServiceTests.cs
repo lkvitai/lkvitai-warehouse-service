@@ -1,3 +1,4 @@
+﻿using System.Linq;
 using Xunit;
 using Lkvitai.Warehouse.Application.Exports.Contracts;
 using Lkvitai.Warehouse.Domain.Entities;
@@ -111,6 +112,58 @@ public sealed class AgnumExportServiceTests
         Assert.Equal("8", parts[5]);
         Assert.Equal("3.00", parts[6]);
         Assert.Equal(string.Empty, parts[8]);
+
+        Cleanup(options.Value);
+    }
+
+    [Fact]
+    public async Task Logical_slice_includes_adjustments()
+    {
+        await using var testDb = new TestDb();
+        var db = testDb.Db;
+
+        var item1 = new Item { Sku = "SKU-L1", Name = "Logical Item 1", UomBase = "PCS" };
+        var item2 = new Item { Sku = "SKU-L2", Name = "Logical Item 2", UomBase = "PCS" };
+        var logical = new WarehouseLogical { Code = "RESERVE", Name = "Reserve" };
+
+        db.Items.AddRange(item1, item2);
+        db.WarehouseLogicals.Add(logical);
+
+        db.StockBalances.Add(new StockBalance
+        {
+            ItemId = item1.Id,
+            WarehouseLogicalId = logical.Id,
+            QtyBase = 4m
+        });
+
+        db.ValueAdjustments.AddRange(
+            new ValueAdjustment { ItemId = item1.Id, WarehouseLogicalId = logical.Id, DeltaValue = 10m, Reason = "adj1" },
+            new ValueAdjustment { ItemId = item2.Id, WarehouseLogicalId = logical.Id, DeltaValue = 5m, Reason = "adj2" });
+
+        await db.SaveChangesAsync();
+
+        var options = CreateOptions();
+        var service = new AgnumExportService(db, options, NullLogger<AgnumExportService>.Instance);
+
+        var job = await service.RunAsync(new AgnumExportRequest(AgnumExportRequest.Types.Logical, logical.Code));
+
+        Assert.Equal(ExportJobStatus.Succeeded, job.Status);
+        var lines = await File.ReadAllLinesAsync(job.FilePath!);
+        Assert.Equal(3, lines.Length);
+
+        var row1 = lines.Single(l => l.Contains(item1.Sku));
+        var parts1 = row1.Split(",");
+        Assert.Equal("Logical", parts1[1]);
+        Assert.Equal(logical.Code, parts1[2]);
+        Assert.Equal("4", parts1[5]);
+        Assert.Equal("10.00", parts1[6]);
+        Assert.Equal(logical.Code, parts1[8]);
+
+        var row2 = lines.Single(l => l.Contains(item2.Sku));
+        var parts2 = row2.Split(",");
+        Assert.Equal("0", parts2[5]);
+        Assert.Equal("5.00", parts2[6]);
+        Assert.Equal(logical.Code, parts2[8]);
 
         Cleanup(options.Value);
     }

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using Lkvitai.Warehouse.Application.Exports;
 using Lkvitai.Warehouse.Application.Exports.Contracts;
@@ -93,7 +93,8 @@ public sealed class AgnumExportService : IAgnumExportService
 
     private static bool IsSupportedSlice(string sliceType) =>
         string.Equals(sliceType, AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(sliceType, AgnumExportRequest.Types.Total, StringComparison.OrdinalIgnoreCase);
+        string.Equals(sliceType, AgnumExportRequest.Types.Total, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sliceType, AgnumExportRequest.Types.Logical, StringComparison.OrdinalIgnoreCase);
 
     private async Task<GenerationResult> GenerateAsync(AgnumExportRequest request, DateTimeOffset exportAtUtc, CancellationToken ct)
     {
@@ -109,10 +110,21 @@ public sealed class AgnumExportService : IAgnumExportService
         var errorFilePath = Path.Combine(_options.ErrorsDir, errorFileName);
         var tempErrorPath = Path.Combine(_options.ErrorsDir, $".{Guid.NewGuid():N}_{errorFileName}");
 
-        var data = await LoadDataAsync(request, ct);
-        IReadOnlyList<AgnumRow> rows = request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase)
-            ? BuildPhysicalRows(data, exportAtUtc)
-            : BuildTotalRows(data, request.SliceKey, exportAtUtc);
+        IReadOnlyList<AgnumRow> rows;
+        if (request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase))
+        {
+            var data = await LoadDataAsync(request, ct);
+            rows = BuildPhysicalRows(data, exportAtUtc);
+        }
+        else if (request.SliceType.Equals(AgnumExportRequest.Types.Total, StringComparison.OrdinalIgnoreCase))
+        {
+            var data = await LoadDataAsync(request, ct);
+            rows = BuildTotalRows(data, request.SliceKey, exportAtUtc);
+        }
+        else
+        {
+            rows = await QueryLogicalAsync(request.SliceKey, exportAtUtc, ct);
+        }
 
         var (validRows, errorRows) = ValidateRows(rows);
 
@@ -142,7 +154,7 @@ public sealed class AgnumExportService : IAgnumExportService
 
     private async Task<IReadOnlyList<BalanceRecord>> LoadDataAsync(AgnumExportRequest request, CancellationToken ct)
     {
-        var physicalFilter = request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase);
+        var isPhysical = request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase);
 
         var baseQuery = from balance in _db.StockBalances.AsNoTracking()
                         join item in _db.Items.AsNoTracking() on balance.ItemId equals item.Id
@@ -166,65 +178,331 @@ public sealed class AgnumExportService : IAgnumExportService
             baseQuery = baseQuery.Where(x => x.warehouse != null && x.warehouse.Code == request.SliceKey);
         }
 
-        if (physicalFilter)
+        if (isPhysical)
         {
             baseQuery = baseQuery.Where(x => x.balance.BinId != null && x.bin != null);
         }
 
-        var data = await baseQuery.ToListAsync(ct);
-        if (data.Count == 0)
+        var records = await baseQuery
+            .Select(x => new BalanceRecord(
+                x.balance.ItemId,
+                x.balance.WarehousePhysicalId,
+                x.warehouse != null ? x.warehouse.Code : null,
+                x.balance.BinId,
+                x.bin != null ? x.bin.Code : null,
+                x.balance.BatchId,
+                x.batch != null ? x.batch.BatchNo : null,
+                x.item.Sku,
+                x.item.UomBase,
+                x.balance.QtyBase,
+                0m,
+                x.batch != null ? x.batch.Quality.ToString() : null,
+                x.batch != null ? x.batch.ExpDate : (DateTime?)null))
+            .ToListAsync(ct);
+
+        var adjustments = await LoadAdjustmentRecordsAsync(request, ct);
+
+        if (records.Count == 0 && adjustments.Count == 0)
         {
             return Array.Empty<BalanceRecord>();
         }
 
-        var keySet = data.Select(x => new AdjustmentKey(x.balance.ItemId, x.balance.WarehousePhysicalId, x.balance.BinId, x.balance.BatchId)).ToHashSet();
-        var adjustments = await LoadAdjustmentsAsync(keySet, ct);
+        var lookup = adjustments.ToDictionary(x => x.Key);
+        var merged = new List<BalanceRecord>(records.Count + lookup.Count);
 
-        return data.Select(x =>
+        foreach (var record in records)
         {
-            var key = new AdjustmentKey(x.balance.ItemId, x.balance.WarehousePhysicalId, x.balance.BinId, x.balance.BatchId);
-            adjustments.TryGetValue(key, out var adjValue);
+            var key = new AdjustmentKey(record.ItemId, record.WarehouseId, record.BinId, record.BatchId);
+            if (lookup.Remove(key, out var adj))
+            {
+                merged.Add(record with { AdjValue = adj.Sum });
+            }
+            else
+            {
+                merged.Add(record);
+            }
+        }
 
-            return new BalanceRecord(
-                x.balance.ItemId,
-                x.balance.WarehousePhysicalId,
-                x.warehouse?.Code,
-                x.balance.BinId,
-                x.bin?.Code,
-                x.balance.BatchId,
-                x.batch?.BatchNo,
-                x.item.Sku,
-                x.item.UomBase,
-                x.balance.QtyBase,
-                adjValue,
-                x.batch?.Quality.ToString(),
-                x.batch?.ExpDate);
-        }).ToList();
+        foreach (var adj in lookup.Values)
+        {
+            merged.Add(new BalanceRecord(
+                adj.Key.ItemId,
+                adj.Key.WarehouseId,
+                adj.WarehouseCode,
+                adj.Key.BinId,
+                adj.BinCode,
+                adj.Key.BatchId,
+                adj.BatchCode,
+                adj.ItemCode,
+                adj.BaseUoM,
+                0m,
+                adj.Sum,
+                adj.Quality,
+                adj.ExpDate));
+        }
+
+        return merged;
     }
 
-    private async Task<Dictionary<AdjustmentKey, decimal>> LoadAdjustmentsAsync(HashSet<AdjustmentKey> keySet, CancellationToken ct)
+    private async Task<List<AdjustmentRecord>> LoadAdjustmentRecordsAsync(AgnumExportRequest request, CancellationToken ct)
     {
-        if (keySet.Count == 0)
+        if (request.SliceType.Equals(AgnumExportRequest.Types.Physical, StringComparison.OrdinalIgnoreCase))
         {
-            return new();
+            return await LoadPhysicalAdjustmentRecordsAsync(request.SliceKey, ct);
         }
 
-        var itemIds = keySet.Select(k => k.ItemId).Distinct().ToArray();
-        var warehouseIds = keySet.Select(k => k.WarehouseId).Where(v => v.HasValue).Select(v => v!.Value).Distinct().ToArray();
-
-        var query = _db.ValueAdjustments.AsNoTracking().Where(x => itemIds.Contains(x.ItemId));
-        if (warehouseIds.Length > 0)
+        if (request.SliceType.Equals(AgnumExportRequest.Types.Total, StringComparison.OrdinalIgnoreCase))
         {
-            query = query.Where(x => warehouseIds.Contains(x.WarehousePhysicalId));
+            return await LoadTotalAdjustmentRecordsAsync(request.SliceKey, ct);
         }
 
-        var adjustments = await query.ToListAsync(ct);
+        return new List<AdjustmentRecord>();
+    }
 
-        return adjustments
-            .Select(adj => new { Key = new AdjustmentKey(adj.ItemId, adj.WarehousePhysicalId, adj.BinId, adj.BatchId), adj.DeltaValue })
-            .Where(x => keySet.Contains(x.Key))
-            .GroupBy(x => x.Key)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.DeltaValue));
+    private async Task<List<AdjustmentRecord>> LoadPhysicalAdjustmentRecordsAsync(string sliceKey, CancellationToken ct)
+    {
+        var query =
+            from v in _db.ValueAdjustments.AsNoTracking()
+            join item in _db.Items.AsNoTracking() on v.ItemId equals item.Id
+            join warehouse in _db.WarehousePhysicals.AsNoTracking() on v.WarehousePhysicalId equals warehouse.Id into whJoin
+            from warehouse in whJoin.DefaultIfEmpty()
+            join bin in _db.Bins.AsNoTracking() on v.BinId equals bin.Id into binJoin
+            from bin in binJoin.DefaultIfEmpty()
+            join batch in _db.StockBatches.AsNoTracking() on v.BatchId equals batch.Id into batchJoin
+            from batch in batchJoin.DefaultIfEmpty()
+            select new { v, item, warehouse, bin, batch };
+
+        if (!string.Equals(sliceKey, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x => x.warehouse != null && x.warehouse.Code == sliceKey);
+        }
+
+        var grouped = await query
+            .GroupBy(x => new
+            {
+                x.v.ItemId,
+                x.v.WarehousePhysicalId,
+                x.v.BinId,
+                x.v.BatchId,
+                x.item.Sku,
+                x.item.UomBase,
+                WarehouseCode = x.warehouse != null ? x.warehouse.Code : null,
+                BinCode = x.bin != null ? x.bin.Code : null,
+                BatchCode = x.batch != null ? x.batch.BatchNo : null,
+                Quality = x.batch != null ? (BatchQuality?)x.batch.Quality : null,
+                ExpDate = x.batch != null ? x.batch.ExpDate : (DateTime?)null
+            })
+            .Select(g => new
+            {
+                g.Key.ItemId,
+                g.Key.WarehousePhysicalId,
+                g.Key.BinId,
+                g.Key.BatchId,
+                g.Key.Sku,
+                g.Key.UomBase,
+                g.Key.WarehouseCode,
+                g.Key.BinCode,
+                g.Key.BatchCode,
+                g.Key.Quality,
+                g.Key.ExpDate,
+                Sum = g.Sum(x => x.v.DeltaValue)
+            })
+            .ToListAsync(ct);
+
+        return grouped
+            .Where(x => x.Sum != 0m)
+            .Select(x => new AdjustmentRecord(
+                new AdjustmentKey(x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId),
+                x.Sum,
+                x.WarehouseCode,
+                x.BinCode,
+                x.BatchCode,
+                x.Sku,
+                x.UomBase,
+                x.Quality?.ToString(),
+                x.ExpDate))
+            .ToList();
+    }
+
+    private async Task<List<AdjustmentRecord>> LoadTotalAdjustmentRecordsAsync(string sliceKey, CancellationToken ct)
+    {
+        var query =
+            from v in _db.ValueAdjustments.AsNoTracking()
+            join item in _db.Items.AsNoTracking() on v.ItemId equals item.Id
+            join warehouse in _db.WarehousePhysicals.AsNoTracking() on v.WarehousePhysicalId equals warehouse.Id into whJoin
+            from warehouse in whJoin.DefaultIfEmpty()
+            select new { v, item, warehouse };
+
+        if (!string.Equals(sliceKey, "ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x => x.warehouse != null && x.warehouse.Code == sliceKey);
+        }
+
+        var grouped = await query
+            .GroupBy(x => new { x.v.ItemId, x.item.Sku, x.item.UomBase })
+            .Select(g => new
+            {
+                g.Key.ItemId,
+                g.Key.Sku,
+                g.Key.UomBase,
+                Sum = g.Sum(x => x.v.DeltaValue)
+            })
+            .ToListAsync(ct);
+
+        return grouped
+            .Where(x => x.Sum != 0m)
+            .Select(x => new AdjustmentRecord(
+                new AdjustmentKey(x.ItemId, null, null, null),
+                x.Sum,
+                WarehouseCode: null,
+                BinCode: null,
+                BatchCode: null,
+                x.Sku,
+                x.UomBase,
+                Quality: null,
+                ExpDate: null))
+            .ToList();
+    }
+
+
+    private async Task<IReadOnlyList<AgnumRow>> QueryLogicalAsync(string sliceKey, DateTimeOffset exportAtUtc, CancellationToken ct)
+    {
+        var includeAll = string.Equals(sliceKey, "ALL", StringComparison.OrdinalIgnoreCase);
+
+        var balanceQuery =
+            from balance in _db.StockBalances.AsNoTracking()
+            where balance.WarehouseLogicalId != null
+            join logical in _db.WarehouseLogicals.AsNoTracking() on balance.WarehouseLogicalId equals logical.Id
+            join item in _db.Items.AsNoTracking() on balance.ItemId equals item.Id
+            join batch in _db.StockBatches.AsNoTracking() on balance.BatchId equals batch.Id into batchJoin
+            from batch in batchJoin.DefaultIfEmpty()
+            select new { balance, logical, item, batch };
+
+        if (!includeAll)
+        {
+            balanceQuery = balanceQuery.Where(x => x.logical.Code == sliceKey);
+        }
+
+        var balanceRows = await balanceQuery
+            .Select(x => new
+            {
+                x.balance.ItemId,
+                LogicalId = x.logical.Id,
+                x.logical.Code,
+                x.balance.BatchId,
+                BatchCode = x.batch != null ? x.batch.BatchNo : null,
+                Quality = x.batch != null ? (BatchQuality?)x.batch.Quality : null,
+                ExpDate = x.batch != null ? x.batch.ExpDate : (DateTime?)null,
+                x.item.Sku,
+                x.item.UomBase,
+                x.balance.QtyBase
+            })
+            .ToListAsync(ct);
+
+        var balanceAggregates = balanceRows
+            .GroupBy(x => new { x.ItemId, x.LogicalId, x.Code, x.BatchId, x.BatchCode, x.Quality, x.ExpDate, x.Sku, x.UomBase })
+            .Select(g => new LogicalBalance(
+                new LogicalKey(g.Key.ItemId, g.Key.LogicalId, g.Key.BatchId),
+                g.Key.Code,
+                g.Key.Sku,
+                g.Key.UomBase,
+                g.Key.BatchCode,
+                g.Key.Quality?.ToString(),
+                g.Key.ExpDate,
+                g.Sum(x => x.QtyBase)))
+            .ToList();
+
+        var adjustmentQuery =
+            from v in _db.ValueAdjustments.AsNoTracking()
+            where v.WarehouseLogicalId != null
+            join logical in _db.WarehouseLogicals.AsNoTracking() on v.WarehouseLogicalId equals logical.Id
+            join item in _db.Items.AsNoTracking() on v.ItemId equals item.Id
+            join batch in _db.StockBatches.AsNoTracking() on v.BatchId equals batch.Id into batchJoin
+            from batch in batchJoin.DefaultIfEmpty()
+            select new { v, logical, item, batch };
+
+        if (!includeAll)
+        {
+            adjustmentQuery = adjustmentQuery.Where(x => x.logical.Code == sliceKey);
+        }
+
+        var adjustmentRows = await adjustmentQuery
+            .GroupBy(x => new
+            {
+                x.v.ItemId,
+                LogicalId = x.logical.Id,
+                x.logical.Code,
+                x.v.BatchId,
+                BatchCode = x.batch != null ? x.batch.BatchNo : null,
+                Quality = x.batch != null ? (BatchQuality?)x.batch.Quality : null,
+                ExpDate = x.batch != null ? x.batch.ExpDate : (DateTime?)null,
+                x.item.Sku,
+                x.item.UomBase
+            })
+            .Select(g => new
+            {
+                g.Key.ItemId,
+                g.Key.LogicalId,
+                g.Key.Code,
+                g.Key.BatchId,
+                g.Key.BatchCode,
+                g.Key.Quality,
+                g.Key.ExpDate,
+                g.Key.Sku,
+                g.Key.UomBase,
+                Sum = g.Sum(x => x.v.DeltaValue)
+            })
+            .ToListAsync(ct);
+
+        var adjustments = adjustmentRows
+            .Where(x => x.Sum != 0m)
+            .Select(x => new LogicalAdjustment(
+                new LogicalKey(x.ItemId, x.LogicalId, x.BatchId),
+                x.Code,
+                x.Sku,
+                x.UomBase,
+                x.BatchCode,
+                x.Quality?.ToString(),
+                x.ExpDate,
+                x.Sum))
+            .ToDictionary(x => x.Key);
+
+        var rows = new List<AgnumRow>(balanceAggregates.Count + adjustments.Count);
+
+        foreach (var balance in balanceAggregates)
+        {
+            adjustments.Remove(balance.Key, out var adj);
+            rows.Add(new AgnumRow(
+                exportAtUtc,
+                AgnumExportRequest.Types.Logical,
+                balance.LogicalCode,
+                balance.ItemCode,
+                balance.BaseUoM,
+                balance.QtyBase,
+                adj?.Sum ?? 0m,
+                balance.BatchCode,
+                balance.LogicalCode,
+                balance.Quality,
+                balance.ExpDate));
+        }
+
+        foreach (var adj in adjustments.Values)
+        {
+            rows.Add(new AgnumRow(
+                exportAtUtc,
+                AgnumExportRequest.Types.Logical,
+                adj.LogicalCode,
+                adj.ItemCode,
+                adj.BaseUoM,
+                0m,
+                adj.Sum,
+                adj.BatchCode,
+                adj.LogicalCode,
+                adj.Quality,
+                adj.ExpDate));
+        }
+
+        return rows;
     }
 
     private static IReadOnlyList<AgnumRow> BuildPhysicalRows(IReadOnlyList<BalanceRecord> records, DateTimeOffset exportAtUtc)
@@ -395,7 +673,7 @@ public sealed class AgnumExportService : IAgnumExportService
             return string.Empty;
         }
 
-        var needsQuotes = value.IndexOfAny(new[] { ',', '\"', '\r', '\n' }) >= 0;
+        var needsQuotes = value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0;
         var escaped = value.Replace("\"", "\"\"");
         return needsQuotes ? $"\"{escaped}\"" : escaped;
     }
@@ -416,6 +694,39 @@ public sealed class AgnumExportService : IAgnumExportService
         decimal AdjValue,
         string? Quality,
         DateTime? ExpDate);
+
+    private sealed record AdjustmentRecord(
+        AdjustmentKey Key,
+        decimal Sum,
+        string? WarehouseCode,
+        string? BinCode,
+        string? BatchCode,
+        string? ItemCode,
+        string? BaseUoM,
+        string? Quality,
+        DateTime? ExpDate);
+
+    private readonly record struct LogicalKey(Guid ItemId, Guid LogicalId, Guid? BatchId);
+
+    private sealed record LogicalBalance(
+        LogicalKey Key,
+        string LogicalCode,
+        string? ItemCode,
+        string? BaseUoM,
+        string? BatchCode,
+        string? Quality,
+        DateTime? ExpDate,
+        decimal QtyBase);
+
+    private sealed record LogicalAdjustment(
+        LogicalKey Key,
+        string LogicalCode,
+        string? ItemCode,
+        string? BaseUoM,
+        string? BatchCode,
+        string? Quality,
+        DateTime? ExpDate,
+        decimal Sum);
 
     private readonly record struct AdjustmentKey(Guid ItemId, Guid? WarehouseId, Guid? BinId, Guid? BatchId);
 
@@ -439,3 +750,5 @@ public sealed class AgnumExportService : IAgnumExportService
         string? ItemCode,
         string Reason);
 }
+
+

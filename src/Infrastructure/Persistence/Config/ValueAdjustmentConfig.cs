@@ -8,7 +8,7 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
 {
     public void Configure(EntityTypeBuilder<ValueAdjustment> b)
     {
-        b.ToTable("value_adjustments", "wh");
+        b.ToTable("value_adjustment", "wh");
         b.HasKey(x => x.Id);
 
         b.Property(x => x.Id)
@@ -20,8 +20,10 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
             .IsRequired();
 
         b.Property(x => x.WarehousePhysicalId)
-            .HasColumnType("uuid")
-            .IsRequired();
+            .HasColumnType("uuid");
+
+        b.Property(x => x.WarehouseLogicalId)
+            .HasColumnType("uuid");
 
         b.Property(x => x.BinId)
             .HasColumnType("uuid");
@@ -30,7 +32,7 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
             .HasColumnType("uuid");
 
         b.Property(x => x.DeltaValue)
-            .HasColumnType("numeric(18,2)")
+            .HasColumnType("numeric(18,6)")
             .IsRequired();
 
         b.Property(x => x.Reason)
@@ -41,13 +43,13 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
             .HasColumnType("timestamptz")
             .IsRequired();
 
-        b.Property(x => x.User)
-            .HasColumnName("user")
-            .HasMaxLength(128)
-            .IsRequired();
+        b.Property(x => x.UserId)
+            .HasColumnName("user_id")
+            .HasMaxLength(128);
 
-        b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId });
-        b.HasIndex(x => x.Timestamp);
+        b.HasIndex(x => x.ItemId);
+        b.HasIndex(x => x.WarehouseLogicalId);
+        b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.WarehouseLogicalId, x.BinId, x.BatchId });
 
         b.HasOne(x => x.Item)
             .WithMany()
@@ -59,9 +61,19 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
             .HasForeignKey(x => x.WarehousePhysicalId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        b.HasOne(x => x.WarehouseLogical)
+            .WithMany()
+            .HasForeignKey(x => x.WarehouseLogicalId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         b.HasOne(x => x.Bin)
             .WithMany()
             .HasForeignKey(x => x.BinId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasOne(x => x.Batch)
+            .WithMany()
+            .HasForeignKey(x => x.BatchId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

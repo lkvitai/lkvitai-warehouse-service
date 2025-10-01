@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Lkvitai.Warehouse.Application.Exports;
 using Lkvitai.Warehouse.Application.Exports.Contracts;
 using Lkvitai.Warehouse.Domain.Entities;
@@ -71,15 +71,20 @@ public sealed class Worker : BackgroundService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var runTime = ParseDailyRun(_options.DailyRunAtUtc);
+        var defaultRunTime = ParseDailyRun(_options.DailyRunAtUtc);
 
         foreach (var schedule in schedules)
         {
-            var nextRun = schedule.NextRunAt ?? ComputeNextRun(now, runTime);
+            var runAt = schedule.AtUtc?.ToTimeSpan() ?? defaultRunTime;
+            var nextRun = schedule.NextRunAt;
+            if (nextRun is null || !IsAligned(nextRun.Value, runAt))
+            {
+                nextRun = ComputeNextRun(now, runAt);
+                schedule.NextRunAt = nextRun;
+            }
 
             if (nextRun > now)
             {
-                schedule.NextRunAt = nextRun;
                 continue;
             }
 
@@ -90,11 +95,17 @@ public sealed class Worker : BackgroundService
             var job = await exportService.RunAsync(request, ct);
 
             schedule.LastRunAt = job.CompletedAt ?? now;
-            schedule.NextRunAt = ComputeNextRun(now, runTime);
+            schedule.NextRunAt = ComputeNextRun(now, runAt);
         }
 
         await db.SaveChangesAsync(ct);
     }
+
+    private static bool IsAligned(DateTimeOffset nextRunAt, TimeSpan runAtUtc) =>
+        nextRunAt.Offset == TimeSpan.Zero &&
+        nextRunAt.Hour == runAtUtc.Hours &&
+        nextRunAt.Minute == runAtUtc.Minutes &&
+        nextRunAt.Second == runAtUtc.Seconds;
 
     private static DateTimeOffset ComputeNextRun(DateTimeOffset referenceUtc, TimeSpan runAtUtc)
     {
@@ -119,3 +130,4 @@ public sealed class Worker : BackgroundService
         return new TimeSpan(19, 30, 0);
     }
 }
+

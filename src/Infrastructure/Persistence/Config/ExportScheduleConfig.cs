@@ -1,4 +1,4 @@
-using Lkvitai.Warehouse.Domain.Entities;
+﻿using Lkvitai.Warehouse.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -26,6 +26,9 @@ public sealed class ExportScheduleConfig : IEntityTypeConfiguration<ExportSchedu
         b.Property(x => x.Enabled)
             .HasColumnType("boolean")
             .HasDefaultValue(true);
+
+        b.Property(x => x.AtUtc)
+            .HasColumnType("time without time zone");
 
         b.Property(x => x.Cron)
             .HasMaxLength(128);

@@ -27,6 +27,7 @@ public class ValueAdjustmentsController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<ValueAdjustmentDto>>> Get(
         [FromQuery] Guid itemId,
         [FromQuery] Guid? warehousePhysicalId,
+        [FromQuery] Guid? warehouseLogicalId,
         [FromQuery] Guid? binId,
         [FromQuery] Guid? batchId,
         CancellationToken ct)
@@ -34,7 +35,8 @@ public class ValueAdjustmentsController : ControllerBase
         if (itemId == Guid.Empty)
             return BadRequest("itemId is required.");
 
-        var list = await _service.GetHistoryAsync(itemId, warehousePhysicalId, binId, batchId, ct);
+        var list = await _service.GetHistoryAsync(itemId, warehousePhysicalId, warehouseLogicalId, binId, batchId, ct);
         return Ok(list);
     }
 }
+

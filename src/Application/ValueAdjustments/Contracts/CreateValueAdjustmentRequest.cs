@@ -2,11 +2,12 @@
 
 public sealed record CreateValueAdjustmentRequest(
     Guid ItemId,
-    Guid WarehousePhysicalId,
+    Guid? WarehousePhysicalId,
+    Guid? WarehouseLogicalId,
     Guid? BinId,
     Guid? BatchId,
     decimal DeltaValue,
     string Reason,
     DateTimeOffset? Timestamp,
-    string User
+    string? UserId
 );

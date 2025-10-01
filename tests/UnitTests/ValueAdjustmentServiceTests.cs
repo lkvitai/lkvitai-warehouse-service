@@ -36,6 +36,7 @@ public class ValueAdjustmentServiceTests
         var dto = await svc.CreateAsync(new CreateValueAdjustmentRequest(
             item.Id,
             wh.Id,
+            null,
             bin.Id,
             null,
             150.50m,
@@ -46,10 +47,10 @@ public class ValueAdjustmentServiceTests
 
         dto.Id.Should().NotBeEmpty();
         dto.Timestamp.Should().NotBe(default);
-        dto.User.Should().Be("tester");
+        dto.UserId.Should().Be("tester");
 
         var dbAdjustment = await td.Db.ValueAdjustments.SingleAsync();
-        dbAdjustment.User.Should().Be("tester");
+        dbAdjustment.UserId.Should().Be("tester");
         dbAdjustment.DeltaValue.Should().Be(150.50m);
 
         var qty = await td.Db.StockBalances.Where(b => b.Id == balance.Id).Select(b => b.QtyBase).SingleAsync();
@@ -86,7 +87,7 @@ public class ValueAdjustmentServiceTests
                 DeltaValue = 50m,
                 Reason = "plus",
                 Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5),
-                User = "tester"
+                UserId = "tester"
             },
             new ValueAdjustment
             {
@@ -96,7 +97,7 @@ public class ValueAdjustmentServiceTests
                 DeltaValue = -5m,
                 Reason = "minus",
                 Timestamp = DateTimeOffset.UtcNow,
-                User = "tester"
+                UserId = "tester"
             },
             new ValueAdjustment
             {
@@ -106,7 +107,7 @@ public class ValueAdjustmentServiceTests
                 DeltaValue = 999m,
                 Reason = "other",
                 Timestamp = DateTimeOffset.UtcNow,
-                User = "tester"
+                UserId = "tester"
             });
         await td.Db.SaveChangesAsync();
 
@@ -118,3 +119,6 @@ public class ValueAdjustmentServiceTests
         balances[0].QtyBase.Should().Be(10m);
     }
 }
+
+
+

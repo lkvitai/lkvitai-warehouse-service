@@ -1,4 +1,4 @@
-namespace Lkvitai.Warehouse.Domain.Entities;
+﻿namespace Lkvitai.Warehouse.Domain.Entities;
 
 public sealed class ExportSchedule
 {
@@ -6,6 +6,7 @@ public sealed class ExportSchedule
     public string SliceType { get; set; } = string.Empty;
     public string SliceKey { get; set; } = string.Empty;
     public bool Enabled { get; set; } = true;
+    public TimeOnly? AtUtc { get; set; }
     public string? Cron { get; set; }
     public DateTimeOffset? LastRunAt { get; set; }
     public DateTimeOffset? NextRunAt { get; set; }
