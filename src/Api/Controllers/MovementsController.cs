@@ -1,4 +1,4 @@
-﻿using Lkvitai.Warehouse.Application.Dto;
+using Lkvitai.Warehouse.Application.Dto;
 using Lkvitai.Warehouse.Domain.Entities;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Lkvitai.Warehouse.Infrastructure.Services;
@@ -25,7 +25,16 @@ public class MovementsController : ControllerBase
         return await _db.Movements.AsNoTracking()
             .OrderByDescending(x => x.PerformedAt)
             .Take(take)
-            .Select(m => new MovementDto(m.Id, m.Type, m.ItemId, m.WarehousePhysicalId, m.BinId, m.QtyBase, m.Reason))
+            .Select(m => new MovementDto(
+                m.Id,
+                m.Type,
+                m.ItemId,
+                m.WarehousePhysicalId,
+                m.BinId,
+                m.QtyBase,
+                m.Reason,
+                m.BatchId,
+                m.BatchNo))
             .ToListAsync();
     }
 
@@ -34,7 +43,16 @@ public class MovementsController : ControllerBase
     {
         var m = await _db.Movements.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
         if (m is null) return NotFound();
-        return new MovementDto(m.Id, m.Type, m.ItemId, m.WarehousePhysicalId, m.BinId, m.QtyBase, m.Reason);
+        return new MovementDto(
+            m.Id,
+            m.Type,
+            m.ItemId,
+            m.WarehousePhysicalId,
+            m.BinId,
+            m.QtyBase,
+            m.Reason,
+            m.BatchId,
+            m.BatchNo);
     }
 
     public record PostMovementRequest(
@@ -45,7 +63,12 @@ public class MovementsController : ControllerBase
         decimal QtyBase,
         string? Reason,
         Guid? ToWarehousePhysicalId,
-        Guid? ToBinId
+        Guid? ToBinId,
+        Guid? BatchId,
+        string? BatchNo,
+        DateTime? BatchMfgDate,
+        DateTime? BatchExpDate,
+        string? BatchQuality
     );
 
     [HttpPost]
@@ -60,11 +83,25 @@ public class MovementsController : ControllerBase
             QtyBase = req.QtyBase,
             Reason = req.Reason,
             ToWarehousePhysicalId = req.ToWarehousePhysicalId,
-            ToBinId = req.ToBinId
+            ToBinId = req.ToBinId,
+            BatchId = req.BatchId,
+            BatchNo = req.BatchNo,
+            BatchMfgDate = req.BatchMfgDate,
+            BatchExpDate = req.BatchExpDate,
+            BatchQuality = req.BatchQuality
         };
 
         var saved = await _svc.PostAsync(m);
-        var dto = new MovementDto(saved.Id, saved.Type, saved.ItemId, saved.WarehousePhysicalId, saved.BinId, saved.QtyBase, saved.Reason);
+        var dto = new MovementDto(
+            saved.Id,
+            saved.Type,
+            saved.ItemId,
+            saved.WarehousePhysicalId,
+            saved.BinId,
+            saved.QtyBase,
+            saved.Reason,
+            saved.BatchId,
+            saved.BatchNo);
         return CreatedAtAction(nameof(GetById), new { id = saved.Id }, dto);
     }
 }

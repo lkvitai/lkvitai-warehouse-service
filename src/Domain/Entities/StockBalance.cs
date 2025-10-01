@@ -1,4 +1,4 @@
-﻿namespace Lkvitai.Warehouse.Domain.Entities;
+namespace Lkvitai.Warehouse.Domain.Entities;
 
 public class StockBalance
 {
@@ -9,4 +9,6 @@ public class StockBalance
     public Guid? BatchId { get; set; }
     public decimal QtyBase { get; set; }
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public StockBatch? Batch { get; set; }
 }

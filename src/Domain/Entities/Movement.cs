@@ -1,4 +1,4 @@
-﻿namespace Lkvitai.Warehouse.Domain.Entities;
+namespace Lkvitai.Warehouse.Domain.Entities;
 
 public class Movement
 {
@@ -18,6 +18,10 @@ public class Movement
     public Guid? ToBinId { get; set; }
 
     public Guid? BatchId { get; set; } // reserved for later
+    public string? BatchNo { get; set; }
+    public DateTime? BatchMfgDate { get; set; }
+    public DateTime? BatchExpDate { get; set; }
+    public string? BatchQuality { get; set; }
 
     public decimal QtyBase { get; set; }  // for MOVE must be > 0
     public string Uom { get; set; } = "pcs";

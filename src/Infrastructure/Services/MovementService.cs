@@ -1,4 +1,4 @@
-﻿using Lkvitai.Warehouse.Domain.Entities;
+using Lkvitai.Warehouse.Domain.Entities;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,22 +19,27 @@ public class MovementService
         switch (m.Type)
         {
             case "IN":
+                await EnsureBatchLifecycleAsync(m, ct, allowCreate: true);
+                await PostInOrAdjustAsync(m, ct);
+                break;
+
             case "ADJUST":
+                await EnsureBatchLifecycleAsync(m, ct, allowCreate: false);
                 await PostInOrAdjustAsync(m, ct);
                 break;
 
             case "MOVE":
+                await EnsureBatchLifecycleAsync(m, ct, allowCreate: false);
+
                 if (m.QtyBase <= 0) throw new InvalidOperationException("MOVE requires QtyBase > 0.");
                 if (m.BinId is null || m.WarehousePhysicalId is null)
                     throw new InvalidOperationException("MOVE requires source WarehousePhysicalId and BinId.");
                 if (m.ToBinId is null || m.ToWarehousePhysicalId is null)
                     throw new InvalidOperationException("MOVE requires destination ToWarehousePhysicalId and ToBinId.");
 
-                // 1) write movement
                 _db.Movements.Add(m);
                 await _db.SaveChangesAsync(ct);
 
-                // 2) debit source
                 var src = await FindOrCreateBalanceAsync(
                     m.ItemId, m.WarehousePhysicalId, m.BinId, m.BatchId, ct);
 
@@ -44,7 +49,6 @@ public class MovementService
                 src.QtyBase -= m.QtyBase;
                 src.UpdatedAt = DateTimeOffset.UtcNow;
 
-                // 3) credit dest
                 var dst = await FindOrCreateBalanceAsync(
                     m.ItemId, m.ToWarehousePhysicalId, m.ToBinId, m.BatchId, ct);
 
@@ -62,6 +66,76 @@ public class MovementService
         return m;
     }
 
+    private async Task EnsureBatchLifecycleAsync(Movement m, CancellationToken ct, bool allowCreate)
+    {
+        if (m.BatchId is null)
+        {
+            if (!string.IsNullOrWhiteSpace(m.BatchNo) || m.BatchMfgDate.HasValue || m.BatchExpDate.HasValue || !string.IsNullOrWhiteSpace(m.BatchQuality))
+                throw new InvalidOperationException("Batch metadata provided without BatchId.");
+            return;
+        }
+
+        var existing = await _db.StockBatches.FindAsync(new object?[] { m.BatchId.Value }, ct);
+        if (existing is null)
+        {
+            if (!allowCreate)
+                throw new InvalidOperationException("Batch does not exist for this movement.");
+
+            var newBatch = new StockBatch
+            {
+                Id = m.BatchId.Value,
+                ItemId = m.ItemId,
+                BatchNo = string.IsNullOrWhiteSpace(m.BatchNo)
+                    ? m.BatchId.Value.ToString("N")[..8]
+                    : m.BatchNo,
+                MfgDate = m.BatchMfgDate,
+                ExpDate = m.BatchExpDate,
+                Quality = ResolveBatchQuality(m.BatchQuality),
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            _db.StockBatches.Add(newBatch);
+            await _db.SaveChangesAsync(ct);
+            return;
+        }
+
+        if (existing.ItemId != m.ItemId)
+            throw new InvalidOperationException("Batch belongs to another item.");
+
+        var touched = false;
+
+        if (!string.IsNullOrWhiteSpace(m.BatchNo) && !string.Equals(existing.BatchNo, m.BatchNo, StringComparison.Ordinal))
+        {
+            existing.BatchNo = m.BatchNo;
+            touched = true;
+        }
+        if (m.BatchMfgDate.HasValue && existing.MfgDate != m.BatchMfgDate)
+        {
+            existing.MfgDate = m.BatchMfgDate;
+            touched = true;
+        }
+        if (m.BatchExpDate.HasValue && existing.ExpDate != m.BatchExpDate)
+        {
+            existing.ExpDate = m.BatchExpDate;
+            touched = true;
+        }
+        if (!string.IsNullOrWhiteSpace(m.BatchQuality))
+        {
+            var newQuality = ResolveBatchQuality(m.BatchQuality);
+            if (existing.Quality != newQuality)
+            {
+                existing.Quality = newQuality;
+                touched = true;
+            }
+        }
+
+        if (touched)
+        {
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
     private async Task PostInOrAdjustAsync(Movement m, CancellationToken ct)
     {
         _db.Movements.Add(m);
@@ -69,7 +143,7 @@ public class MovementService
 
         var bal = await FindOrCreateBalanceAsync(m.ItemId, m.WarehousePhysicalId, m.BinId, m.BatchId, ct);
 
-        bal.QtyBase += m.QtyBase; // for ADJUST allow +/- as provided
+        bal.QtyBase += m.QtyBase;
         if (bal.QtyBase < 0)
             throw new InvalidOperationException("Resulting balance would be negative.");
 
@@ -93,11 +167,20 @@ public class MovementService
                 WarehousePhysicalId = whId,
                 BinId = binId,
                 BatchId = batchId,
-                QtyBase = 0m
+                QtyBase = 0m,
+                UpdatedAt = DateTimeOffset.UtcNow
             };
             _db.StockBalances.Add(bal);
             await _db.SaveChangesAsync(ct);
         }
         return bal;
+    }
+
+    private static BatchQuality ResolveBatchQuality(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return BatchQuality.Ok;
+
+        return Enum.TryParse<BatchQuality>(value, true, out var parsed) ? parsed : BatchQuality.Ok;
     }
 }

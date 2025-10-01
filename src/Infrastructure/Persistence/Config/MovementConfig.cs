@@ -1,4 +1,4 @@
-﻿using Lkvitai.Warehouse.Domain.Entities;
+using Lkvitai.Warehouse.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -25,10 +25,16 @@ public class MovementConfig : IEntityTypeConfiguration<Movement>
         b.Property(x => x.ToBinId).HasColumnType("uuid");
 
         b.Property(x => x.BatchId).HasColumnType("uuid");
+        b.Property(x => x.BatchNo).HasMaxLength(128);
+        b.Property(x => x.BatchQuality).HasMaxLength(32);
+        b.Property(x => x.BatchMfgDate).HasColumnType("date");
+        b.Property(x => x.BatchExpDate).HasColumnType("date");
+
         b.Property(x => x.QtyBase).HasColumnType("numeric(18,6)");
         b.Property(x => x.Uom).HasMaxLength(16);
         b.Property(x => x.Factor).HasColumnType("numeric(18,6)");
         b.Property(x => x.Reason).HasMaxLength(256);
+        b.Property(x => x.Ref).HasMaxLength(128);
         b.Property(x => x.PerformedAt).HasColumnType("timestamptz");
         b.Property(x => x.MetaJson).HasColumnType("jsonb");
 

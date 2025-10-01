@@ -1,4 +1,4 @@
-﻿using Lkvitai.Warehouse.Domain.Entities;
+using Lkvitai.Warehouse.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -20,7 +20,11 @@ public class StockBalanceConfig : IEntityTypeConfiguration<StockBalance>
         b.Property(x => x.QtyBase).HasColumnType("numeric(18,6)");
         b.Property(x => x.UpdatedAt).HasColumnType("timestamptz");
 
-        // уникальность "остатка" по измерениям
+        b.HasOne(x => x.Batch)
+            .WithMany(x => x.Balances)
+            .HasForeignKey(x => x.BatchId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId }).IsUnique();
     }
 }

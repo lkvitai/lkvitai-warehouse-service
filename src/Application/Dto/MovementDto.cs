@@ -1,4 +1,4 @@
-﻿namespace Lkvitai.Warehouse.Application.Dto;
+namespace Lkvitai.Warehouse.Application.Dto;
 
 public record MovementDto(
     Guid Id,
@@ -7,5 +7,7 @@ public record MovementDto(
     Guid? WarehousePhysicalId,
     Guid? BinId,
     decimal QtyBase,
-    string? Reason
+    string? Reason,
+    Guid? BatchId,
+    string? BatchNo
 );

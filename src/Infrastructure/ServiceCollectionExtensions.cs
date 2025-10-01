@@ -1,5 +1,7 @@
-﻿using System;
+using System;
+using Lkvitai.Warehouse.Application.Batches;
 using Lkvitai.Warehouse.Application.ValueAdjustments;
+using Lkvitai.Warehouse.Application.WarehousePlan;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Lkvitai.Warehouse.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +14,7 @@ namespace Lkvitai.Warehouse.Infrastructure
     {
         public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration cfg)
         {
-            // Берём строку подключения из appsettings; если пусто — пробуем из переменной окружения (на dev это WH_CS)
+            // ????? ?????? ??????????? ?? appsettings; ???? ????? � ??????? ?? ?????????? ????????? (?? dev ??? WH_CS)
             var cs = cfg.GetConnectionString("Warehouse");
             if (string.IsNullOrWhiteSpace(cs))
                 cs = Environment.GetEnvironmentVariable("WH_CS");
@@ -23,17 +25,19 @@ namespace Lkvitai.Warehouse.Infrastructure
             }
             else
             {
-                // Fallback для локальной разработки (можешь удалить, если не нужен)
+                // Fallback ??? ????????? ?????????? (?????? ???????, ???? ?? ?????)
                 services.AddDbContext<WarehouseDbContext>(o =>
                     o.UseNpgsql("Host=localhost;Port=5432;Database=lkvitai-mes-wh;Username=app_user;Password=app_pass"));
             }
 
             AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
-            // DI сервисов домена/инфры
+            // DI ???????? ??????/?????
             services.AddScoped<MovementService>();
             services.AddScoped<InventoryService>();
             services.AddScoped<IValueAdjustmentService, ValueAdjustmentService>();
+            services.AddScoped<IWarehousePlanService, WarehousePlanService>();
+            services.AddScoped<IBatchQueryService, BatchQueryService>();
 
             return services;
         }
