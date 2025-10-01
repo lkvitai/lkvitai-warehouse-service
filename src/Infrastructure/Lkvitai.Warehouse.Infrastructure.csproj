@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Domain\Lkvitai.Warehouse.Domain.csproj" />
+    <ProjectReference Include="..\Application\Lkvitai.Warehouse.Application.csproj" />
   </ItemGroup>
 
 </Project>

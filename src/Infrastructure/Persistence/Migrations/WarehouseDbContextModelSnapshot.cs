@@ -283,28 +283,56 @@ namespace Lkvitai.Warehouse.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("ItemId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("PerformedBy")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)")
-                        .HasColumnName("performed_by");
-
                     b.Property<string>("Reason")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
 
                     b.Property<DateTimeOffset>("Timestamp")
                         .HasColumnType("timestamptz");
 
-                    b.Property<Guid?>("WarehousePhysicalId")
+                    b.Property<string>("User")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("user");
+
+                    b.Property<Guid>("WarehousePhysicalId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
                     b.HasIndex("Timestamp");
 
-                    b.HasIndex("ItemId", "BatchId", "WarehousePhysicalId", "BinId");
+                    b.HasIndex("ItemId", "WarehousePhysicalId", "BinId", "BatchId");
 
-                    b.ToTable("value_adjustment", "wh");
+                    b.ToTable("value_adjustments", "wh");
+                });
+
+            modelBuilder.Entity("Lkvitai.Warehouse.Domain.Entities.ValueAdjustment", b =>
+                {
+                    b.HasOne("Lkvitai.Warehouse.Domain.Entities.Bin", "Bin")
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Lkvitai.Warehouse.Domain.Entities.Item", "Item")
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Lkvitai.Warehouse.Domain.Entities.WarehousePhysical", "WarehousePhysical")
+                        .WithMany()
+                        .HasForeignKey("WarehousePhysicalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Bin");
+
+                    b.Navigation("Item");
+
+                    b.Navigation("WarehousePhysical");
                 });
 
             modelBuilder.Entity("Lkvitai.Warehouse.Domain.Entities.WarehouseLogical", b =>

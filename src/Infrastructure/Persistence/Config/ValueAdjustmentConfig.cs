@@ -8,21 +8,60 @@ public class ValueAdjustmentConfig : IEntityTypeConfiguration<ValueAdjustment>
 {
     public void Configure(EntityTypeBuilder<ValueAdjustment> b)
     {
-        b.ToTable("value_adjustment", "wh");
+        b.ToTable("value_adjustments", "wh");
         b.HasKey(x => x.Id);
+
         b.Property(x => x.Id)
             .HasColumnType("uuid")
             .ValueGeneratedOnAdd();
-        b.Property(x => x.ItemId).HasColumnType("uuid");
-        b.Property(x => x.WarehousePhysicalId).HasColumnType("uuid");
-        b.Property(x => x.BinId).HasColumnType("uuid");
-        b.Property(x => x.BatchId).HasColumnType("uuid");
-        b.Property(x => x.DeltaValue).HasColumnType("numeric(18,2)");
-        b.Property(x => x.Reason).HasMaxLength(256);
-        b.Property(x => x.Timestamp).HasColumnType("timestamptz");
-        b.Property(x => x.PerformedBy).HasColumnName("performed_by").HasMaxLength(128);
 
+        b.Property(x => x.ItemId)
+            .HasColumnType("uuid")
+            .IsRequired();
+
+        b.Property(x => x.WarehousePhysicalId)
+            .HasColumnType("uuid")
+            .IsRequired();
+
+        b.Property(x => x.BinId)
+            .HasColumnType("uuid");
+
+        b.Property(x => x.BatchId)
+            .HasColumnType("uuid");
+
+        b.Property(x => x.DeltaValue)
+            .HasColumnType("numeric(18,2)")
+            .IsRequired();
+
+        b.Property(x => x.Reason)
+            .HasMaxLength(512)
+            .IsRequired();
+
+        b.Property(x => x.Timestamp)
+            .HasColumnType("timestamptz")
+            .IsRequired();
+
+        b.Property(x => x.User)
+            .HasColumnName("user")
+            .HasMaxLength(128)
+            .IsRequired();
+
+        b.HasIndex(x => new { x.ItemId, x.WarehousePhysicalId, x.BinId, x.BatchId });
         b.HasIndex(x => x.Timestamp);
-        b.HasIndex(x => new { x.ItemId, x.BatchId, x.WarehousePhysicalId, x.BinId });
+
+        b.HasOne(x => x.Item)
+            .WithMany()
+            .HasForeignKey(x => x.ItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasOne(x => x.WarehousePhysical)
+            .WithMany()
+            .HasForeignKey(x => x.WarehousePhysicalId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        b.HasOne(x => x.Bin)
+            .WithMany()
+            .HasForeignKey(x => x.BinId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

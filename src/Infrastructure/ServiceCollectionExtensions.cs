@@ -1,4 +1,5 @@
 ﻿using System;
+using Lkvitai.Warehouse.Application.ValueAdjustments;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Lkvitai.Warehouse.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -32,7 +33,7 @@ namespace Lkvitai.Warehouse.Infrastructure
             // DI сервисов домена/инфры
             services.AddScoped<MovementService>();
             services.AddScoped<InventoryService>();
-            services.AddScoped<ValueAdjustmentService>();
+            services.AddScoped<IValueAdjustmentService, ValueAdjustmentService>();
 
             return services;
         }

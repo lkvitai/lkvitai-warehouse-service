@@ -1,11 +1,10 @@
 ﻿using FluentAssertions;
 using Lkvitai.Warehouse.Api.Controllers;
-using Lkvitai.Warehouse.Domain.Entities;
+using Lkvitai.Warehouse.Application.ValueAdjustments.Contracts;
 using Lkvitai.Warehouse.Infrastructure.Services;
+using Lkvitai.Warehouse.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
 using System.Linq;
-using System.Threading.Tasks;
 using Xunit;
 
 namespace Lkvitai.Warehouse.UnitTests;
@@ -34,21 +33,23 @@ public class ValueAdjustmentServiceTests
 
         var svc = new ValueAdjustmentService(td.Db);
 
-        var saved = await svc.CreateAsync(new ValueAdjustment
-        {
-            ItemId = item.Id,
-            WarehousePhysicalId = wh.Id,
-            BinId = bin.Id,
-            DeltaValue = 150.50m,
-            Reason = "Revaluation",
-            PerformedBy = "tester"
-        });
+        var dto = await svc.CreateAsync(new CreateValueAdjustmentRequest(
+            item.Id,
+            wh.Id,
+            bin.Id,
+            null,
+            150.50m,
+            "Revaluation",
+            DateTimeOffset.UtcNow,
+            "tester"),
+            default);
 
-        saved.Id.Should().NotBeEmpty();
-        saved.Timestamp.Should().NotBe(default);
+        dto.Id.Should().NotBeEmpty();
+        dto.Timestamp.Should().NotBe(default);
+        dto.User.Should().Be("tester");
 
         var dbAdjustment = await td.Db.ValueAdjustments.SingleAsync();
-        dbAdjustment.PerformedBy.Should().Be("tester");
+        dbAdjustment.User.Should().Be("tester");
         dbAdjustment.DeltaValue.Should().Be(150.50m);
 
         var qty = await td.Db.StockBalances.Where(b => b.Id == balance.Id).Select(b => b.QtyBase).SingleAsync();
@@ -63,7 +64,8 @@ public class ValueAdjustmentServiceTests
         var item = new Item { Sku = "VAL-2", Name = "Value item", UomBase = "pcs" };
         var wh = new WarehousePhysical { Code = "WHV2", Name = "Value WH" };
         var bin = new Bin { WarehousePhysicalId = wh.Id, Code = "B1", Kind = "STORAGE" };
-        td.Db.AddRange(item, wh, bin);
+        var otherBin = new Bin { WarehousePhysicalId = wh.Id, Code = "B2", Kind = "STORAGE" };
+        td.Db.AddRange(item, wh, bin, otherBin);
         await td.Db.SaveChangesAsync();
 
         td.Db.StockBalances.Add(new StockBalance
@@ -82,7 +84,9 @@ public class ValueAdjustmentServiceTests
                 WarehousePhysicalId = wh.Id,
                 BinId = bin.Id,
                 DeltaValue = 50m,
-                Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5)
+                Reason = "plus",
+                Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5),
+                User = "tester"
             },
             new ValueAdjustment
             {
@@ -90,15 +94,19 @@ public class ValueAdjustmentServiceTests
                 WarehousePhysicalId = wh.Id,
                 BinId = bin.Id,
                 DeltaValue = -5m,
-                Timestamp = DateTimeOffset.UtcNow
+                Reason = "minus",
+                Timestamp = DateTimeOffset.UtcNow,
+                User = "tester"
             },
             new ValueAdjustment
             {
                 ItemId = item.Id,
                 WarehousePhysicalId = wh.Id,
-                BinId = Guid.NewGuid(),
+                BinId = otherBin.Id,
                 DeltaValue = 999m,
-                Timestamp = DateTimeOffset.UtcNow
+                Reason = "other",
+                Timestamp = DateTimeOffset.UtcNow,
+                User = "tester"
             });
         await td.Db.SaveChangesAsync();
 

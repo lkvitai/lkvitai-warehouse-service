@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using Lkvitai.Warehouse.Application.Dto;
 using Lkvitai.Warehouse.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -37,9 +37,9 @@ public class BalancesController : ControllerBase
                 b.UpdatedAt,
                 (from adj in _db.ValueAdjustments.AsNoTracking()
                  where adj.ItemId == b.ItemId
-                       && (adj.WarehousePhysicalId ?? Guid.Empty) == (b.WarehousePhysicalId ?? Guid.Empty)
-                       && (adj.BinId ?? Guid.Empty) == (b.BinId ?? Guid.Empty)
-                       && (adj.BatchId ?? Guid.Empty) == (b.BatchId ?? Guid.Empty)
+                       && adj.WarehousePhysicalId == b.WarehousePhysicalId
+                       && adj.BinId == b.BinId
+                       && adj.BatchId == b.BatchId
                  select (decimal?)adj.DeltaValue).Sum() ?? 0m))
             .ToListAsync();
 
